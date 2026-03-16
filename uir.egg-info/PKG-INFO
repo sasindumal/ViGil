@@ -1,0 +1,133 @@
+Metadata-Version: 2.4
+Name: uir
+Version: 0.1.0
+Summary: Unified Instruction Representation for Heterogeneous Malware Analysis
+Author: ViGiL Project
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Science/Research
+Classifier: Topic :: Security
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: pefile>=2023.2.7
+Requires-Dist: python-magic-bin>=0.4.14
+Requires-Dist: py7zr>=0.20.8
+Requires-Dist: rarfile>=4.1
+Requires-Dist: pycdlib>=1.14.0
+Requires-Dist: oletools>=0.60.1
+Requires-Dist: torch>=2.0.0
+Requires-Dist: networkx>=3.0
+Requires-Dist: tqdm>=4.65.0
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: scikit-learn>=1.3.0
+Requires-Dist: pylnk3>=0.4.2
+Provides-Extra: gpu
+Requires-Dist: torch-geometric>=2.4.0; extra == "gpu"
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: black; extra == "dev"
+Requires-Dist: flake8; extra == "dev"
+Dynamic: author
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: provides-extra
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+# UIR - Unified Instruction Representation
+
+A deep learning framework for heterogeneous malware analysis using Code Property Graphs and Heterogeneous Graph Transformers.
+
+## Overview
+
+UIR provides a unified approach to malware analysis across diverse file formats:
+- **Native Binaries**: PE (EXE, DLL), ELF, Mach-O
+- **Scripts**: JavaScript, Python, PowerShell, VBScript, Batch, Shell
+- **Documents**: Office documents (DOC, DOCX, XLS, XLSM), PDF, RTF
+- **Launchers**: LNK shortcuts, URL files
+- **Archives**: ZIP, RAR, 7z, ISO, MSI (recursive extraction)
+
+## Installation
+
+```bash
+cd c:\Users\sasin\Documents\ViGiL
+pip install -e .
+```
+
+For GPU support:
+```bash
+pip install -e ".[gpu]"
+```
+
+## Quick Start
+
+### Process a Single File
+
+```bash
+# Get file information
+uir process --input file.exe --info
+
+# Generate CPG
+uir process --input file.exe --output file.cpg.json --verbose
+```
+
+### Batch Processing
+
+```bash
+# Get dataset statistics
+uir batch --input-dir ./malware_dataset --stats
+
+# Process entire directory
+uir batch --input-dir ./malware_dataset --output-dir ./cpgs
+```
+
+### Train Model
+
+```bash
+# Train on generated CPGs
+uir train --data-dir ./cpgs --epochs 50 --test
+```
+
+## Architecture
+
+```
+uir/
+├── extraction/          # File type ID, archive extraction
+├── lifting/             # Binary, script, document, launcher lifting
+├── cpg/                 # Code Property Graph schema and builder
+├── tokenization/        # Vocabulary, BPE, embeddings
+├── model/               # HGT model, trainer, evaluator
+└── pipeline/            # End-to-end processing, CLI
+```
+
+## Usage Example
+
+```python
+from uir.pipeline.processor import FileProcessor
+from uir.config import UIRConfig
+
+# Initialize
+config = UIRConfig()
+processor = FileProcessor(config)
+
+# Process file
+cpg = processor.process("sample.exe")
+
+print(f"Nodes: {cpg.num_nodes}, Edges: {cpg.num_edges}")
+print(f"Methods: {len(cpg.get_methods())}")
+
+# Save CPG
+cpg.save("sample.cpg.json")
+```
+
+## License
+
+MIT License
