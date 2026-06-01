@@ -2,20 +2,29 @@
 # ViGiL — Start Script
 # Starts both backend and frontend in development mode
 
-set -e
+# Resolve repo root regardless of where the script is called from
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-BACKEND_DIR="$(cd "$(dirname "$0")/backend" && pwd)"
-FRONTEND_DIR="$(cd "$(dirname "$0")/frontend" && pwd)"
+BACKEND_DIR="$ROOT_DIR/backend"
+FRONTEND_DIR="$ROOT_DIR/frontend"
+
+# Ensure ~/bin (capa, floss) is in PATH
+export PATH="$HOME/bin:$PATH"
 
 echo "════════════════════════════════════════"
 echo "  ViGiL — Malware Analysis Platform"
 echo "════════════════════════════════════════"
 
 # Check if .env exists
-if [ ! -f "$(dirname "$0")/.env" ]; then
+if [ ! -f "$ROOT_DIR/.env" ]; then
     echo "⚠️  No .env found — copying from .env.example"
-    cp "$(dirname "$0")/.env.example" "$(dirname "$0")/.env"
+    cp "$ROOT_DIR/.env.example" "$ROOT_DIR/.env"
 fi
+# Free ports before starting (handles re-runs without manual cleanup)
+echo "▶ Freeing ports 8000 and 5173..."
+lsof -ti:8000,5173 | xargs kill -9 2>/dev/null || true
+sleep 1
 
 # Start backend
 echo ""
