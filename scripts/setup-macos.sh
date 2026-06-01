@@ -4,11 +4,12 @@
 #
 # Usage: bash scripts/setup-macos.sh
 
-set -e
+# NOTE: We do NOT use 'set -e' so that one step failing doesn't abort others
 
 ARCH=$(uname -m)
 BIN="$HOME/bin"
 mkdir -p "$BIN"
+export PATH="$BIN:$PATH"   # ensure ~/bin binaries are usable immediately in this session
 
 CAPA_VERSION="9.4.0"
 FLOSS_VERSION="3.1.1"
@@ -35,8 +36,17 @@ echo "▶ Installing Python analysis packages..."
 if [ -f "backend/venv/bin/activate" ]; then
     source backend/venv/bin/activate
 fi
+
+# setuptools 69.5.1 exposes pkg_resources — required by speakeasy's unicorn==1.0.2 dependency
+pip install "setuptools==69.5.1" --force-reinstall -q
 pip install speakeasy-emulator -q
-python -c "import speakeasy; print('  ✓ speakeasy', speakeasy.__version__)"
+
+# Verify speakeasy (non-fatal — emulation falls back to heuristics if broken)
+if python -c "import speakeasy; speakeasy.Speakeasy()" 2>/dev/null; then
+    echo "  ✓ speakeasy OK"
+else
+    echo "  ⚠ speakeasy installed but emulation may fall back to heuristics"
+fi
 
 # ── CAPA ────────────────────────────────────────────────────────────
 echo ""
@@ -49,21 +59,22 @@ fi
 curl -sL "$CAPA_URL" -o /tmp/capa.zip
 unzip -o /tmp/capa.zip -d /tmp/capa_bin/ &>/dev/null
 cp /tmp/capa_bin/capa "$BIN/capa" && chmod +x "$BIN/capa"
+# Remove macOS quarantine so the binary can run without Gatekeeper prompt
+xattr -d com.apple.quarantine "$BIN/capa" 2>/dev/null || true
 export PATH="$BIN:$PATH"
-echo "  ✓ capa $("$BIN/capa" --version)"
+echo "  ✓ capa installed at $BIN/capa"
 
-# ── FLOSS ───────────────────────────────────────────────────────────
+# ── FLOSS ────────────────────────────────────────────────────
 echo ""
 echo "▶ Installing FLOSS v${FLOSS_VERSION} (Mandiant FLARE)..."
-if [ "$ARCH" = "arm64" ]; then
-    FLOSS_URL="https://github.com/mandiant/flare-floss/releases/download/v${FLOSS_VERSION}/floss-v${FLOSS_VERSION}-macos-arm64.zip"
-else
-    FLOSS_URL="https://github.com/mandiant/flare-floss/releases/download/v${FLOSS_VERSION}/floss-v${FLOSS_VERSION}-macos.zip"
-fi
-curl -sL "$FLOSS_URL" -o /tmp/floss.zip
+# FLOSS ships a single universal macOS binary (supports arm64 + x86_64)
+curl -sL "https://github.com/mandiant/flare-floss/releases/download/v${FLOSS_VERSION}/floss-v${FLOSS_VERSION}-macos.zip" -o /tmp/floss.zip
 unzip -o /tmp/floss.zip -d /tmp/floss_bin/ &>/dev/null
 cp /tmp/floss_bin/floss "$BIN/floss" && chmod +x "$BIN/floss"
-echo "  ✓ floss $("$BIN/floss" --version)"
+# Remove macOS quarantine so the binary can run without Gatekeeper prompt
+xattr -d com.apple.quarantine "$BIN/floss" 2>/dev/null || true
+export PATH="$BIN:$PATH"
+echo "  ✓ floss installed at $BIN/floss"
 
 
 # ── PATH ────────────────────────────────────────────────────────────

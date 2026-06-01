@@ -5,7 +5,7 @@
 #
 # Usage: bash scripts/setup-linux.sh
 
-set -e
+# NOTE: We do NOT use 'set -e' so that one step failing doesn't abort others
 
 ARCH=$(uname -m)   # x86_64 or aarch64
 BIN="/usr/local/bin"
@@ -62,8 +62,16 @@ echo "▶ Installing Python analysis packages..."
 if [ -f "backend/venv/bin/activate" ]; then
     source backend/venv/bin/activate
 fi
+
+# setuptools 69.5.1 exposes pkg_resources — required by speakeasy's unicorn==1.0.2
+pip install "setuptools==69.5.1" --force-reinstall -q
 pip install speakeasy-emulator -q
-python -c "import speakeasy; print('  ✓ speakeasy', speakeasy.__version__)"
+
+if python -c "import speakeasy; speakeasy.Speakeasy()" 2>/dev/null; then
+    echo "  ✓ speakeasy OK"
+else
+    echo "  ⚠ speakeasy installed but emulation may fall back to heuristics"
+fi
 
 # ── CAPA ────────────────────────────────────────────────────────────
 echo ""
