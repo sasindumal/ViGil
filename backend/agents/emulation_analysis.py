@@ -51,20 +51,31 @@ PERSISTENCE_KEYS = [
 ]
 
 
-def _run_speakeasy(file_path: Path) -> dict | None:
-    """Run Speakeasy emulation and collect behavioral report."""
+def _run_speakeasy(file_path: Path, timeout_secs: int = 60) -> dict | None:
+    """Run Speakeasy emulation with a hard timeout."""
+    import signal
+
+    def _timeout_handler(signum, frame):
+        raise TimeoutError(f"Speakeasy exceeded {timeout_secs}s limit")
+
     try:
         import speakeasy  # type: ignore
 
-        se = speakeasy.Speakeasy()
-        module = se.load_module(str(file_path))
-        se.run_module(module)
-        report = se.get_report()
+        # SIGALRM is Unix-only (macOS + Linux) — safe for our platforms
+        old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+        signal.alarm(timeout_secs)
+        try:
+            se = speakeasy.Speakeasy()
+            module = se.load_module(str(file_path))
+            se.run_module(module)
+            report = se.get_report()
+        finally:
+            signal.alarm(0)                         # cancel alarm
+            signal.signal(signal.SIGALRM, old_handler)  # restore handler
         return report
+    except TimeoutError as e:
+        logger.warning(f"[Emulation] {e} — switching to heuristic analysis")
     except (ImportError, ModuleNotFoundError) as e:
-        # speakeasy-emulator 1.5.11 depends on unicorn==1.0.2 which uses
-        # pkg_resources / distutils — both removed in Python 3.12.
-        # The heuristic fallback is used automatically.
         logger.warning(f"[Emulation] Speakeasy not available ({e}). Using heuristic fallback.")
     except Exception as e:
         logger.warning(f"[Emulation] Speakeasy failed: {e}")

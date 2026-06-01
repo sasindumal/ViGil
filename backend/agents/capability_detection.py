@@ -4,6 +4,7 @@ Uses CAPA to identify malware capabilities, with mock fallback for demo.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -22,6 +23,10 @@ _CAPA_BINARY = (
     else "capa"
 )
 
+# Disk cache for CAPA results keyed by SHA256 — avoids re-running on identical files
+_CAPA_CACHE_DIR = Path(os.path.expanduser("~/.cache/vigil/capa"))
+_CAPA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
 
 CAPABILITY_KEYWORDS = {
     "credential theft": ["credential", "password", "credential-theft", "lsass", "ntlm", "kerberos"],
@@ -34,17 +39,43 @@ CAPABILITY_KEYWORDS = {
 }
 
 
+def _sha256_of_file(file_path: Path) -> str:
+    h = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def _run_capa(file_path: Path) -> Optional[dict]:
-    """Run CAPA binary and parse JSON output."""
+    """Run CAPA binary with caching and parse JSON output."""
+    # ── Cache lookup ─────────────────────────────────────────────────────────
+    sha256 = _sha256_of_file(file_path)
+    cache_file = _CAPA_CACHE_DIR / f"{sha256}.json"
+    if cache_file.exists():
+        logger.info(f"[CAPA] Cache hit for {file_path.name} ({sha256[:12]}...)")
+        try:
+            return json.loads(cache_file.read_text())
+        except Exception:
+            cache_file.unlink(missing_ok=True)  # corrupt cache — discard
+
+    # ── Run CAPA ─────────────────────────────────────────────────────────────
     try:
         result = subprocess.run(
-            [str(_CAPA_BINARY), "--json", str(file_path)],
+            [
+                str(_CAPA_BINARY),
+                "--json",
+                "--os", "windows",   # skip Linux/macOS rules — ~40% speedup
+                str(file_path),
+            ],
             capture_output=True,
             text=True,
             timeout=settings.capa_timeout,
         )
         if result.returncode == 0:
-            return json.loads(result.stdout)
+            parsed = json.loads(result.stdout)
+            cache_file.write_text(json.dumps(parsed))   # persist to cache
+            return parsed
         logger.warning(f"[CAPA] Non-zero exit: {result.returncode}")
     except FileNotFoundError:
         logger.warning("[CAPA] capa binary not found — using heuristic analysis")

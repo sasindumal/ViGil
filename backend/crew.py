@@ -128,27 +128,45 @@ async def run_pipeline(
         {"is_packed": unpack_result.is_packed, "packer": unpack_result.packer, "layers": unpack_result.layers}
     )
 
-    # ── Agent 4: Capability Detection ─────────────────────────────────────────
-    await _emit(progress_callback, job_id, "Capability Detection", 3, "started", "Running CAPA capability detection...")
-    cap_result = await asyncio.get_event_loop().run_in_executor(
-        None, run_capability_detection, file_path, static_result.imports
+    # ── Agents 4-8: Parallel stage ───────────────────────────────────────────
+    # CAPA, CFG, Evasion, Emulation all depend only on static_result and run
+    # independently — execute concurrently so slow CAPA doesn't block others.
+    await _emit(progress_callback, job_id, "Capability Detection", 3, "started",
+                "Running CAPA + CFG + Evasion + Emulation in parallel...")
+    await _emit(progress_callback, job_id, "CFG Extraction",      4, "started", "Control flow graph extraction queued...")
+    await _emit(progress_callback, job_id, "Evasion Detection",   6, "started", "Evasion detection queued...")
+    await _emit(progress_callback, job_id, "Emulation Analysis",  7, "started", "Behavioral emulation queued (60s limit)...")
+
+    loop = asyncio.get_event_loop()
+    cap_result, cfg_result, evasion_result, emu_result = await asyncio.gather(
+        loop.run_in_executor(None, run_capability_detection, file_path, static_result.imports),
+        loop.run_in_executor(None, run_cfg_extraction, file_path, output_dir),
+        loop.run_in_executor(None, run_evasion_detection, file_path,
+                             static_result.suspicious_strings + static_result.urls + static_result.domains,
+                             static_result.imports),
+        loop.run_in_executor(None, run_emulation_analysis, file_path,
+                             static_result.imports,
+                             static_result.suspicious_strings + static_result.urls + static_result.domains),
     )
+
     await _emit(progress_callback, job_id, "Capability Detection", 3, "completed",
         f"Capabilities: {len(cap_result.capabilities)} detected",
         {"capabilities": cap_result.capabilities[:5]}
-    )
-
-    # ── Agent 5: CFG Extraction ───────────────────────────────────────────────
-    await _emit(progress_callback, job_id, "CFG Extraction", 4, "started", "Generating control flow and call graphs...")
-    cfg_result = await asyncio.get_event_loop().run_in_executor(
-        None, run_cfg_extraction, file_path, output_dir
     )
     await _emit(progress_callback, job_id, "CFG Extraction", 4, "completed",
         f"Functions: {cfg_result.function_count} | Avg complexity: {cfg_result.avg_complexity}",
         {"function_count": cfg_result.function_count, "suspicious": len(cfg_result.suspicious_functions)}
     )
+    await _emit(progress_callback, job_id, "Evasion Detection", 6, "completed",
+        f"Evasion score: {evasion_result.evasion_score}/100 | Anti-VM: {evasion_result.anti_vm} | Anti-Debug: {evasion_result.anti_debug}",
+        {"score": evasion_result.evasion_score, "anti_vm": evasion_result.anti_vm, "anti_debug": evasion_result.anti_debug}
+    )
+    await _emit(progress_callback, job_id, "Emulation Analysis", 7, "completed",
+        f"API calls: {len(emu_result.api_calls)} | Network: {len(emu_result.network_connections)} | Domains: {len(emu_result.domains_contacted)}",
+        {"api_calls": len(emu_result.api_calls), "network": len(emu_result.network_connections), "files_created": len(emu_result.files_created)}
+    )
 
-    # ── Agent 6 (run order 5): Threat Intelligence ────────────────────────────
+    # ── Agent 6: Threat Intelligence ─────────────────────────────────────────
     await _emit(progress_callback, job_id, "Threat Intelligence", 5, "started", "Querying threat intelligence APIs...")
     intel_result = await run_threat_intel(
         sha256=sample_result.sha256,
@@ -158,29 +176,6 @@ async def run_pipeline(
     await _emit(progress_callback, job_id, "Threat Intelligence", 5, "completed",
         f"VT: {intel_result.virustotal_detections}/{intel_result.virustotal_total} | Family: {intel_result.known_family or 'Unknown'}",
         {"detections": intel_result.virustotal_detections, "family": intel_result.known_family, "demo_mode": intel_result.demo_mode}
-    )
-
-    # ── Agent 7 (run order 6): Evasion Detection ──────────────────────────────
-    await _emit(progress_callback, job_id, "Evasion Detection", 6, "started", "Detecting anti-VM, anti-debug, API obfuscation...")
-    evasion_result = await asyncio.get_event_loop().run_in_executor(
-        None, run_evasion_detection, file_path,
-        static_result.suspicious_strings + static_result.urls + static_result.domains,
-        static_result.imports
-    )
-    await _emit(progress_callback, job_id, "Evasion Detection", 6, "completed",
-        f"Evasion score: {evasion_result.evasion_score}/100 | Anti-VM: {evasion_result.anti_vm} | Anti-Debug: {evasion_result.anti_debug}",
-        {"score": evasion_result.evasion_score, "anti_vm": evasion_result.anti_vm, "anti_debug": evasion_result.anti_debug}
-    )
-
-    # ── Agent 8 (run order 7): Emulation Analysis ─────────────────────────────
-    await _emit(progress_callback, job_id, "Emulation Analysis", 7, "started", "Running behavioral emulation via Speakeasy...")
-    emu_result = await asyncio.get_event_loop().run_in_executor(
-        None, run_emulation_analysis, file_path, static_result.imports,
-        static_result.suspicious_strings + static_result.urls + static_result.domains
-    )
-    await _emit(progress_callback, job_id, "Emulation Analysis", 7, "completed",
-        f"Files: {len(emu_result.files_created)} | Registry: {len(emu_result.registry_keys_created)} | Domains: {len(emu_result.domains_contacted)}",
-        {"files_created": len(emu_result.files_created), "domains": emu_result.domains_contacted[:3]}
     )
 
     # ── Agent 9 (run order 8): Similarity Analysis ────────────────────────────
