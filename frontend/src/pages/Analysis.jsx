@@ -19,8 +19,6 @@ const ALL_AGENTS = [
   { name: 'Similarity Analysis',   desc: 'Family similarity embeddings (FAISS)',          phase: 1 },
   { name: 'Family Clustering',     desc: 'HDBSCAN cluster assignment',                  phase: 1 },
   { name: 'MITRE ATT&CK Mapping', desc: 'Technique coverage mapping',                  phase: 1 },
-  { name: 'RAG Intelligence',      desc: 'Evidence-backed analyst explanation',         phase: 1 },
-  { name: 'LLM Decompilation',     desc: 'Decompiling suspicious functions with LLM',   phase: 1 },
   { name: 'YARA Generation',       desc: 'Auto-generated hunting rules',                phase: 1 },
   { name: 'ATT&CK Navigator Export', desc: 'Navigator layer JSON',                     phase: 1 },
   { name: 'STIX Export',           desc: 'STIX 2.1 bundle generation',                  phase: 1 },
@@ -344,15 +342,9 @@ export default function AnalysisPage() {
                     <div className="section-title" style={{ fontSize: '0.65rem', marginBottom: '8px' }}>
                       Latest Result
                     </div>
-                    {agentStatuses[currentAgent].result.reasoning ? (
-                      <div className="agent-reasoning" style={{ fontSize: '0.8rem', lineHeight: '1.4', whiteSpace: 'pre-wrap', color: '#a0aec0' }}>
-                        {agentStatuses[currentAgent].result.reasoning}
-                      </div>
-                    ) : (
-                      <pre className="result-json">
-                        {JSON.stringify(agentStatuses[currentAgent].result, null, 2)}
-                      </pre>
-                    )}
+                    <pre className="result-json">
+                      {JSON.stringify(agentStatuses[currentAgent].result, null, 2)}
+                    </pre>
                   </motion.div>
                 )}
               </AnimatePresence>
