@@ -1,35 +1,48 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCircle, XCircle, Loader, Shield, Clock, ChevronRight } from 'lucide-react'
+import { CheckCircle, XCircle, Loader, Shield, Clock, ChevronRight, Brain, Cpu } from 'lucide-react'
 import api from '../api'
 import './Analysis.css'
 
+// ─── Agent pipeline definition (matches backend AGENTS list) ────────────────
 const ALL_AGENTS = [
-  { name: 'Sample Intake', desc: 'PE validation, hashes, metadata' },
-  { name: 'Static Analysis', desc: 'Imports, sections, strings, entropy' },
-  { name: 'Unpacking', desc: 'Packer detection, multi-stage unpacking' },
-  { name: 'Capability Detection', desc: 'CAPA — credential theft, injection, ransomware' },
-  { name: 'CFG Extraction', desc: 'Control flow graph, call graph' },
-  { name: 'Threat Intelligence', desc: 'VirusTotal, MalwareBazaar, OTX' },
-  { name: 'Evasion Detection', desc: 'Anti-VM, anti-debug, API obfuscation' },
-  { name: 'Emulation Analysis', desc: 'Speakeasy behavioral emulation' },
-  { name: 'Similarity Analysis', desc: 'Family similarity embeddings (FAISS)' },
-  { name: 'Family Clustering', desc: 'HDBSCAN cluster assignment' },
-  { name: 'MITRE ATT&CK Mapping', desc: 'Technique coverage mapping' },
-  { name: 'RAG Intelligence', desc: 'Evidence-backed LLM explanation' },
-  { name: 'LLM Decompilation', desc: 'Function decompilation with LLM summaries' },
-  { name: 'YARA Generation', desc: 'Auto-generated hunting rules' },
-  { name: 'ATT&CK Navigator Export', desc: 'Navigator layer JSON' },
-  { name: 'STIX Export', desc: 'STIX 2.1 bundle generation' },
-  { name: 'Report Generation', desc: 'Final report assembly' },
+  // Phase 1 — Deterministic tools
+  { name: 'Sample Intake',         desc: 'PE validation, hashes, metadata',              phase: 1 },
+  { name: 'Static Analysis',       desc: 'Imports, sections, strings, entropy',          phase: 1 },
+  { name: 'Unpacking',             desc: 'Packer detection, multi-stage unpacking',      phase: 1 },
+  { name: 'Capability Detection',  desc: 'CAPA — credential theft, injection, ransomware', phase: 1 },
+  { name: 'CFG Extraction',        desc: 'Control flow graph, call graph',               phase: 1 },
+  { name: 'Threat Intelligence',   desc: 'VirusTotal, MalwareBazaar, OTX',              phase: 1 },
+  { name: 'Evasion Detection',     desc: 'Anti-VM, anti-debug, API obfuscation',         phase: 1 },
+  { name: 'Emulation Analysis',    desc: 'Speakeasy behavioral emulation (60s limit)',   phase: 1 },
+  { name: 'Similarity Analysis',   desc: 'Family similarity embeddings (FAISS)',          phase: 1 },
+  { name: 'Family Clustering',     desc: 'HDBSCAN cluster assignment',                  phase: 1 },
+  { name: 'MITRE ATT&CK Mapping', desc: 'Technique coverage mapping',                  phase: 1 },
+  { name: 'YARA Generation',       desc: 'Auto-generated hunting rules',                phase: 1 },
+  { name: 'ATT&CK Navigator Export', desc: 'Navigator layer JSON',                     phase: 1 },
+  { name: 'STIX Export',           desc: 'STIX 2.1 bundle generation',                  phase: 1 },
+  // Phase 2 — CrewAI agentic reasoning
+  { name: '[AI] Static PE Analyst',    desc: 'LLM reasons over PE structure & entropy', phase: 2 },
+  { name: '[AI] Behavioral Analyst',   desc: 'LLM interprets emulation & evasion',      phase: 2 },
+  { name: '[AI] Threat Intel Analyst', desc: 'LLM attributes family & threat actor',    phase: 2 },
+  { name: '[AI] Verdict Analyst',      desc: 'LLM synthesizes evidence → verdict',      phase: 2 },
+  { name: '[AI] Report Writer',        desc: 'LLM produces executive summary',          phase: 2 },
+  // Phase 3 — Final assembly
+  { name: 'Report Generation',    desc: 'Final report assembly',                        phase: 3 },
 ]
 
 const STATUS_ICON = {
-  pending: <div className="agent-pending-dot" />,
-  started: <Loader size={16} className="agent-spinner" />,
+  pending:   <div className="agent-pending-dot" />,
+  started:   <Loader size={16} className="agent-spinner" />,
   completed: <CheckCircle size={16} className="text-success" />,
-  failed: <XCircle size={16} className="text-danger" />,
+  failed:    <XCircle size={16} className="text-danger" />,
+}
+
+const PHASE_LABELS = {
+  1: { label: 'Phase 1 — Evidence Collection', icon: <Cpu size={12} /> },
+  2: { label: 'Phase 2 — AI Reasoning (CrewAI)', icon: <Brain size={12} /> },
+  3: { label: 'Phase 3 — Report Assembly', icon: <CheckCircle size={12} /> },
 }
 
 export default function AnalysisPage() {
@@ -46,6 +59,7 @@ export default function AnalysisPage() {
   const [startTime] = useState(Date.now())
   const [elapsed, setElapsed] = useState(0)
   const [logs, setLogs] = useState([])
+  const [currentPhase, setCurrentPhase] = useState(1)
   const logsEndRef = useRef(null)
 
   // Elapsed timer
@@ -59,9 +73,7 @@ export default function AnalysisPage() {
     api.getJob(jobId)
       .then(job => {
         setFilename(job.filename)
-        if (job.status === 'completed') {
-          navigate(`/report/${jobId}`)
-        }
+        if (job.status === 'completed') navigate(`/report/${jobId}`)
       })
       .catch(console.error)
   }, [jobId, navigate])
@@ -83,7 +95,6 @@ export default function AnalysisPage() {
         return
       }
 
-      // Agent progress event
       const { agent_index, status, message, result_summary, agent_name } = data
 
       setAgentStatuses(prev => ({
@@ -91,12 +102,15 @@ export default function AnalysisPage() {
         [agent_index]: { status, message, result: result_summary }
       }))
 
+      // Track current phase
+      const agent = ALL_AGENTS[agent_index]
+      if (agent) setCurrentPhase(agent.phase)
+
       if (status === 'started') {
         setCurrentAgent(agent_index)
         addLog(`[${agent_name}] Started`)
       } else if (status === 'completed') {
         addLog(`[${agent_name}] ✓ ${message}`)
-        // Auto-navigate when last agent completes
         if (agent_index === ALL_AGENTS.length - 1) {
           setJobStatus('completed')
           setTimeout(() => navigate(`/report/${jobId}`), 1500)
@@ -109,17 +123,12 @@ export default function AnalysisPage() {
 
     ws.onerror = () => {
       addLog('[WebSocket] Connection error — polling for status...')
-      // Fallback polling
       startPolling()
     }
 
-    ws.onclose = () => {
-      addLog('[WebSocket] Connection closed')
-    }
+    ws.onclose = () => addLog('[WebSocket] Connection closed')
 
-    return () => {
-      ws.close()
-    }
+    return () => ws.close()
   }, [jobId, navigate])
 
   function addLog(msg) {
@@ -130,28 +139,25 @@ export default function AnalysisPage() {
     const interval = setInterval(async () => {
       try {
         const job = await api.getJob(jobId)
-        if (job.status === 'completed') {
-          clearInterval(interval)
-          navigate(`/report/${jobId}`)
-        } else if (job.status === 'failed') {
-          clearInterval(interval)
-          setJobStatus('failed')
-        }
-      } catch {
-        clearInterval(interval)
-      }
+        if (job.status === 'completed') { clearInterval(interval); navigate(`/report/${jobId}`) }
+        else if (job.status === 'failed') { clearInterval(interval); setJobStatus('failed') }
+      } catch { clearInterval(interval) }
     }, 3000)
   }
 
-  // Auto-scroll logs
-  useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [logs])
+  useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [logs])
 
   const completedCount = Object.values(agentStatuses).filter(s => s.status === 'completed').length
   const progress = Math.round((completedCount / ALL_AGENTS.length) * 100)
-
   const formatTime = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+
+  // Group agents by phase for rendering
+  const agentsByPhase = ALL_AGENTS.reduce((acc, agent, i) => {
+    const p = agent.phase
+    if (!acc[p]) acc[p] = []
+    acc[p].push({ ...agent, index: i })
+    return acc
+  }, {})
 
   return (
     <div className="analysis-page">
@@ -162,11 +168,16 @@ export default function AnalysisPage() {
             <div className="logo">
               <ShieldIcon />
               <span className="logo-text">ViGiL</span>
+              <span className="logo-version">v2.0</span>
             </div>
             <div className="analysis-meta">
               <div className="meta-item">
                 <Clock size={14} />
                 {formatTime(elapsed)}
+              </div>
+              <div className="meta-item phase-badge">
+                <Brain size={14} />
+                Phase {currentPhase}
               </div>
               <div className="meta-item">
                 <div className={`status-dot ${jobStatus === 'running' ? 'running' : jobStatus === 'completed' ? 'completed' : 'failed'}`} />
@@ -179,17 +190,14 @@ export default function AnalysisPage() {
 
       <main className="analysis-main">
         <div className="container">
-          {/* Page title */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             className="analysis-title-block"
           >
             <h1 className="analysis-title">
-              {jobStatus === 'completed'
-                ? 'Analysis Complete'
-                : jobStatus === 'failed'
-                ? 'Analysis Failed'
+              {jobStatus === 'completed' ? 'Analysis Complete'
+                : jobStatus === 'failed' ? 'Analysis Failed'
                 : 'Analyzing Sample'}
             </h1>
             {filename && (
@@ -198,6 +206,15 @@ export default function AnalysisPage() {
                 <span className="text-mono text-accent">{filename}</span>
               </p>
             )}
+            {/* Phase progress pills */}
+            <div className="phase-pills">
+              {[1, 2, 3].map(p => (
+                <div key={p} className={`phase-pill ${currentPhase === p ? 'active' : currentPhase > p ? 'done' : ''}`}>
+                  {p === 2 ? <Brain size={11} /> : p === 3 ? <CheckCircle size={11} /> : <Cpu size={11} />}
+                  {PHASE_LABELS[p].label}
+                </div>
+              ))}
+            </div>
           </motion.div>
 
           {/* Progress bar */}
@@ -211,37 +228,48 @@ export default function AnalysisPage() {
           </div>
 
           <div className="analysis-grid">
-            {/* Agent Pipeline */}
+            {/* Agent Pipeline — grouped by phase */}
             <div className="pipeline-panel glass-card">
               <div className="section-title">Agent Pipeline</div>
               <div className="pipeline-list">
-                {ALL_AGENTS.map((agent, i) => {
-                  const s = agentStatuses[i]
-                  const isActive = i === currentAgent && s.status === 'started'
-                  const isDone = s.status === 'completed'
-                  const isFailed = s.status === 'failed'
+                {Object.entries(agentsByPhase).map(([phase, agents]) => (
+                  <div key={phase}>
+                    <div className={`phase-separator phase-${phase}`}>
+                      {PHASE_LABELS[phase].icon}
+                      {PHASE_LABELS[phase].label}
+                    </div>
+                    {agents.map(agent => {
+                      const s = agentStatuses[agent.index]
+                      const isActive = agent.index === currentAgent && s.status === 'started'
+                      const isDone = s.status === 'completed'
+                      const isFailed = s.status === 'failed'
+                      const isAI = agent.phase === 2
 
-                  return (
-                    <motion.div
-                      key={agent.name}
-                      className={`pipeline-item ${isActive ? 'active' : ''} ${isDone ? 'done' : ''} ${isFailed ? 'failed-item' : ''}`}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: i * 0.02 }}
-                    >
-                      <div className="pipeline-index">{String(i + 1).padStart(2, '0')}</div>
-                      <div className="pipeline-info">
-                        <div className="pipeline-name">{agent.name}</div>
-                        <div className="pipeline-desc">
-                          {s.status !== 'pending' ? s.message || agent.desc : agent.desc}
-                        </div>
-                      </div>
-                      <div className="pipeline-status">
-                        {STATUS_ICON[s.status]}
-                      </div>
-                    </motion.div>
-                  )
-                })}
+                      return (
+                        <motion.div
+                          key={agent.name}
+                          className={`pipeline-item ${isActive ? 'active' : ''} ${isDone ? 'done' : ''} ${isFailed ? 'failed-item' : ''} ${isAI ? 'ai-agent' : ''}`}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: agent.index * 0.02 }}
+                        >
+                          <div className="pipeline-index">
+                            {isAI ? <Brain size={10} /> : String(agent.index + 1).padStart(2, '0')}
+                          </div>
+                          <div className="pipeline-info">
+                            <div className="pipeline-name">{agent.name}</div>
+                            <div className="pipeline-desc">
+                              {s.status !== 'pending' ? s.message || agent.desc : agent.desc}
+                            </div>
+                          </div>
+                          <div className="pipeline-status">
+                            {STATUS_ICON[s.status]}
+                          </div>
+                        </motion.div>
+                      )
+                    })}
+                  </div>
+                ))}
               </div>
 
               {/* Stats */}
@@ -272,9 +300,9 @@ export default function AnalysisPage() {
                   </div>
                 ) : (
                   logs.map((entry, i) => (
-                    <div key={i} className="log-entry">
+                    <div key={i} className={`log-entry ${entry.msg.includes('[AI]') ? 'log-ai' : ''}`}>
                       <span className="log-time">{entry.time.slice(11, 19)}</span>
-                      <span className={`log-msg ${entry.msg.includes('✗') ? 'text-danger' : entry.msg.includes('✓') ? 'text-success' : ''}`}>
+                      <span className={`log-msg ${entry.msg.includes('✗') ? 'text-danger' : entry.msg.includes('✓') ? 'text-success' : entry.msg.includes('[AI]') ? 'text-ai' : ''}`}>
                         {entry.msg}
                       </span>
                     </div>
@@ -282,6 +310,24 @@ export default function AnalysisPage() {
                 )}
                 <div ref={logsEndRef} />
               </div>
+
+              {/* AI phase notice */}
+              <AnimatePresence>
+                {currentPhase === 2 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    className="ai-phase-notice"
+                  >
+                    <Brain size={16} />
+                    <div>
+                      <div className="ai-notice-title">CrewAI Hierarchical Reasoning Active</div>
+                      <div className="ai-notice-sub">5 specialized LLM agents are collaborating to produce a final verdict</div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Current agent result */}
               <AnimatePresence>
@@ -318,10 +364,7 @@ export default function AnalysisPage() {
                   <div className="completed-title">Analysis Complete!</div>
                   <div className="completed-sub">Redirecting to report...</div>
                 </div>
-                <button
-                  className="btn btn-primary"
-                  onClick={() => navigate(`/report/${jobId}`)}
-                >
+                <button className="btn btn-primary" onClick={() => navigate(`/report/${jobId}`)}>
                   View Report <ChevronRight size={16} />
                 </button>
               </motion.div>
@@ -341,9 +384,7 @@ export default function AnalysisPage() {
                   <div className="failed-title">Analysis Failed</div>
                   <div className="failed-sub">Check the log for details. Some tools may not be installed.</div>
                 </div>
-                <button className="btn btn-ghost" onClick={() => navigate('/')}>
-                  Try Again
-                </button>
+                <button className="btn btn-ghost" onClick={() => navigate('/')}>Try Again</button>
               </motion.div>
             )}
           </AnimatePresence>

@@ -4,7 +4,7 @@ import { motion } from 'framer-motion'
 import {
   Shield, Download, ChevronLeft, AlertTriangle, CheckCircle,
   XCircle, Copy, ExternalLink, Terminal, Cpu, Globe, Lock,
-  Database, Eye, Zap, FileText, BarChart2, Code
+  Database, Eye, Zap, FileText, BarChart2, Code, Brain, Sparkles
 } from 'lucide-react'
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
@@ -128,7 +128,7 @@ export default function ReportPage() {
   const { threat_level, confidence_score, verdict_reasoning, sample_intake, static_analysis,
     unpacking, capabilities, evasion, emulation, similarity, clustering, threat_intel,
     mitre, rag_explanation, decompilation, yara, attack_navigator, stix, filename,
-    analysis_timestamp, analysis_duration_seconds } = report
+    analysis_timestamp, analysis_duration_seconds, agentic_verdict } = report
 
   return (
     <div className="report-page">
@@ -195,6 +195,7 @@ export default function ReportPage() {
               <div className="sidebar-nav">
                 {[
                   { id: 'verdict', label: 'Verdict' },
+                  ...(report.agentic_verdict ? [{ id: 'agentic', label: '🧠 AI Verdict' }] : []),
                   { id: 'file-info', label: 'File Info' },
                   { id: 'static', label: 'Static Analysis' },
                   { id: 'unpacking', label: 'Unpacking' },
@@ -284,8 +285,117 @@ export default function ReportPage() {
                       <span className="text-mono">{clustering.cluster_label}</span>
                     </div>
                   )}
+                  {agentic_verdict && (
+                    <div className="verdict-meta-item">
+                      <span className="text-secondary">AI Model</span>
+                      <span className="text-mono">{agentic_verdict.llm_provider}/{agentic_verdict.llm_model || 'local'}</span>
+                    </div>
+                  )}
                 </div>
               </motion.div>
+
+              {/* ── Agentic AI Verdict ────────────────────────────── */}
+              {agentic_verdict && (
+                <motion.div
+                  className="glass-card report-section agentic-verdict-card"
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  id="agentic"
+                >
+                  <div className="report-section-header">
+                    <div className="section-title">
+                      <Brain size={14} />
+                      Agentic AI Verdict
+                      <span className="ai-crew-badge">CrewAI · Hierarchical · {agentic_verdict.llm_provider}</span>
+                    </div>
+                  </div>
+
+                  {/* AI Verdict header */}
+                  <div className="agentic-header">
+                    <div>
+                      <div className={`agentic-threat threat-${agentic_verdict.threat_level}`}>
+                        {agentic_verdict.threat_level?.toUpperCase()}
+                      </div>
+                      <div className="agentic-meta">
+                        <span>Confidence: <strong>{Math.round(agentic_verdict.confidence_score * 100)}%</strong></span>
+                        {agentic_verdict.malware_family && <span>Family: <strong className="text-accent">{agentic_verdict.malware_family}</strong></span>}
+                        {agentic_verdict.malware_type && <span>Type: <strong>{agentic_verdict.malware_type}</strong></span>}
+                        {agentic_verdict.threat_actor && <span>Actor: <strong className="text-warning">{agentic_verdict.threat_actor}</strong></span>}
+                      </div>
+                    </div>
+                    <div className="agentic-icon"><Brain size={40} style={{ color: '#7c3aed', opacity: 0.8 }} /></div>
+                  </div>
+
+                  {/* Executive summary */}
+                  {agentic_verdict.executive_summary && (
+                    <div className="agentic-summary">
+                      <div className="agentic-block-label">Executive Summary</div>
+                      <p className="agentic-summary-text">{agentic_verdict.executive_summary}</p>
+                    </div>
+                  )}
+
+                  {/* Reasoning chain — agent thoughts */}
+                  {agentic_verdict.reasoning_chain && (
+                    <div className="agentic-chain">
+                      <div className="agentic-block-label">Agent Reasoning Chain</div>
+                      {[
+                        { key: 'static_analysis_thought',  label: 'Static PE Analyst',    color: '#00e5ff' },
+                        { key: 'behavioral_thought',       label: 'Behavioral Analyst',    color: '#00ff88' },
+                        { key: 'threat_intel_thought',     label: 'Threat Intel Analyst',  color: '#ffd700' },
+                        { key: 'verdict_thought',          label: 'Verdict Analyst',       color: '#ff8c00' },
+                        { key: 'report_thought',           label: 'Report Writer',         color: '#a78bfa' },
+                      ].filter(a => agentic_verdict.reasoning_chain[a.key]).map(agent => {
+                        const thought = agentic_verdict.reasoning_chain[agent.key]
+                        return (
+                          <div key={agent.key} className="agent-thought">
+                            <div className="agent-thought-header" style={{ '--agent-color': agent.color }}>
+                              <Brain size={12} />
+                              <span className="agent-thought-role">{agent.label}</span>
+                              <span className="agent-thought-conf">{Math.round((thought.confidence || 0) * 100)}%</span>
+                            </div>
+                            {thought.findings && (
+                              <p className="agent-thought-text">{thought.findings.slice(0, 300)}{thought.findings.length > 300 ? '...' : ''}</p>
+                            )}
+                            {thought.key_indicators?.length > 0 && (
+                              <div className="agent-indicators">
+                                {thought.key_indicators.map((ind, i) => (
+                                  <span key={i} className="badge badge-info">{ind}</span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {/* Key evidence + Recommended actions */}
+                  <div className="agentic-two-col">
+                    {agentic_verdict.key_evidence?.length > 0 && (
+                      <div className="agentic-evidence">
+                        <div className="agentic-block-label">Key Evidence</div>
+                        {agentic_verdict.key_evidence.map((e, i) => (
+                          <div key={i} className="agentic-evidence-item">
+                            <AlertTriangle size={11} className="text-warning" />
+                            <span>{e}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {agentic_verdict.recommended_actions?.length > 0 && (
+                      <div className="agentic-actions">
+                        <div className="agentic-block-label">Recommended Actions</div>
+                        {agentic_verdict.recommended_actions.map((a, i) => (
+                          <div key={i} className="agentic-action-item">
+                            <CheckCircle size={11} className="text-success" />
+                            <span>{a}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
 
               {/* ── File Info ────────────────────────────────────── */}
               {sample_intake && (

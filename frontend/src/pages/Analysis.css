@@ -292,3 +292,155 @@
   opacity: 0.7;
   color: var(--color-text-secondary);
 }
+
+/* ─── Phase Separators ───────────────────────────────────────────────────── */
+.phase-separator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px 4px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-text-dim);
+  border-top: 1px solid var(--color-border);
+  margin-top: 8px;
+}
+
+.phase-separator:first-child {
+  border-top: none;
+  margin-top: 0;
+}
+
+.phase-separator.phase-2 {
+  color: #a78bfa;
+}
+
+.phase-separator.phase-3 {
+  color: var(--color-green);
+}
+
+/* ─── AI Agent Items ─────────────────────────────────────────────────────── */
+.pipeline-item.ai-agent {
+  background: rgba(124, 58, 237, 0.04);
+  border-left: 2px solid rgba(124, 58, 237, 0.3);
+}
+
+.pipeline-item.ai-agent.active {
+  background: rgba(124, 58, 237, 0.1);
+  border-color: rgba(124, 58, 237, 0.5);
+  border-left-color: #7c3aed;
+  box-shadow: 0 0 12px rgba(124, 58, 237, 0.15);
+}
+
+.pipeline-item.ai-agent .pipeline-name {
+  color: #c4b5fd;
+}
+
+.pipeline-item.ai-agent .pipeline-index {
+  color: #7c3aed;
+  display: flex;
+  align-items: center;
+}
+
+/* ─── Phase Pills ────────────────────────────────────────────────────────── */
+.phase-pills {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.phase-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-dim);
+  background: transparent;
+  transition: all 0.3s ease;
+}
+
+.phase-pill.active {
+  border-color: rgba(0, 229, 255, 0.4);
+  color: var(--color-cyan);
+  background: rgba(0, 229, 255, 0.07);
+}
+
+.phase-pill.active:nth-child(2) {
+  border-color: rgba(124, 58, 237, 0.4);
+  color: #a78bfa;
+  background: rgba(124, 58, 237, 0.08);
+}
+
+.phase-pill.done {
+  border-color: rgba(0, 255, 136, 0.3);
+  color: var(--color-green);
+  background: rgba(0, 255, 136, 0.05);
+}
+
+/* ─── Phase Badge in header ──────────────────────────────────────────────── */
+.phase-badge {
+  color: #a78bfa !important;
+}
+
+/* ─── AI Phase Notice ────────────────────────────────────────────────────── */
+.ai-phase-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  background: rgba(124, 58, 237, 0.08);
+  border: 1px solid rgba(124, 58, 237, 0.25);
+  border-radius: 10px;
+  color: #a78bfa;
+  animation: ai-pulse 2s ease-in-out infinite;
+}
+
+@keyframes ai-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0); }
+  50%       { box-shadow: 0 0 0 6px rgba(124, 58, 237, 0.08); }
+}
+
+.ai-notice-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #c4b5fd;
+}
+
+.ai-notice-sub {
+  font-size: 0.7rem;
+  color: #a78bfa;
+  opacity: 0.8;
+  margin-top: 2px;
+}
+
+/* ─── AI Log entries ─────────────────────────────────────────────────────── */
+.log-entry.log-ai {
+  background: rgba(124, 58, 237, 0.04);
+  border-radius: 4px;
+  padding: 3px 6px;
+  margin: 1px -6px;
+}
+
+.text-ai {
+  color: #a78bfa !important;
+}
+
+/* ─── Logo version badge ─────────────────────────────────────────────────── */
+.logo-version {
+  font-size: 0.6rem;
+  font-weight: 700;
+  background: rgba(124, 58, 237, 0.2);
+  color: #a78bfa;
+  border: 1px solid rgba(124, 58, 237, 0.3);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-left: 4px;
+  font-family: var(--font-mono);
+}
