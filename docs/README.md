@@ -122,6 +122,23 @@ VECTOR_STORE=faiss
 | [setup.md](./setup.md) | Step-by-step installation guide |
 | [tech_stack.md](./tech_stack.md) | Technology choices and rationale |
 | [real-mode.md](./real-mode.md) | **How to switch from mock to real data** |
+| [platforms.md](./platforms.md) | macOS and Linux compatibility guide |
+
+## Setup Scripts
+
+One-command tool installation (optional analysis tools only — core platform runs without them):
+
+```bash
+# macOS (Apple Silicon or Intel — auto-detected)
+bash scripts/setup-macos.sh
+
+# Linux (Ubuntu/Debian/Fedora/Arch — auto-detected)
+bash scripts/setup-linux.sh
+
+# Verify all tools after setup
+bash scripts/check-tools.sh
+```
+
 
 ---
 

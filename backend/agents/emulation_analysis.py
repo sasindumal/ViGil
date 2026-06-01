@@ -61,8 +61,11 @@ def _run_speakeasy(file_path: Path) -> dict | None:
         se.run_module(module)
         report = se.get_report()
         return report
-    except ImportError:
-        logger.warning("[Emulation] Speakeasy not installed")
+    except (ImportError, ModuleNotFoundError) as e:
+        # speakeasy-emulator 1.5.11 depends on unicorn==1.0.2 which uses
+        # pkg_resources / distutils — both removed in Python 3.12.
+        # The heuristic fallback is used automatically.
+        logger.warning(f"[Emulation] Speakeasy not available ({e}). Using heuristic fallback.")
     except Exception as e:
         logger.warning(f"[Emulation] Speakeasy failed: {e}")
     return None
