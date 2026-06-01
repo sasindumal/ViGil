@@ -80,6 +80,9 @@ echo "── Python Packages (venv) ──────────────�
 check_py "pefile"  "pefile"  "__version__"
 check_py "lief"    "lief"    "__version__"
 check_py "angr"    "angr"    "__version__"
+check_py "crewai"  "crewai"  "__version__"
+check_py "aiosqlite" "aiosqlite" "__version__"
+check_py "litellm" "litellm" "__version__"
 
 # Speakeasy has no __version__ — check instantiation
 if "$VENV_PY" -c "import speakeasy; speakeasy.Speakeasy()" 2>/dev/null; then

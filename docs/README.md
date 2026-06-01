@@ -21,7 +21,7 @@
 
 ## Overview
 
-ViGiL is an analyst-focused malware triage and reverse-engineering platform. Instead of an ML model predicting "malicious/benign," every verdict is assembled from **17 specialized agents** operating sequentially on the submitted PE file.
+ViGiL is an analyst-focused malware triage and reverse-engineering platform. Instead of an ML model predicting "malicious/benign," every verdict is assembled from **14 deterministic tools** passing evidence into a **5-Agent CrewAI Hierarchical Engine**.
 
 The verdict is produced from:
 - **Static evidence** — PE sections, imports, entropy, strings
@@ -29,10 +29,10 @@ The verdict is produced from:
 - **Evasion indicators** — anti-VM, anti-debug, API obfuscation
 - **CAPA capabilities** — credential theft, injection, ransomware
 - **Threat intelligence** — VirusTotal, MalwareBazaar, AbuseIPDB, OTX
-- **Similarity analysis** — cosine distance against known malware families
+- **CrewAI Synthesis** — 5 LLM agents acting as Static, Behavioral, Threat Intel, and Verdict analysts
 - **ATT&CK technique coverage** — mapped with confidence scores
 
-Every conclusion is traceable to specific, concrete evidence.
+Every conclusion is traceable to specific, concrete evidence via the AI reasoning chain.
 
 ---
 
@@ -96,7 +96,11 @@ npm run dev
 All settings live in `.env` (copy from `.env.example`):
 
 ```env
-# LLM Provider: openai | gemini | ollama
+# Agentic AI
+CREWAI_ENABLED=true
+CREWAI_VERBOSE=true
+
+# LLM Provider: openai | gemini | ollama | lmstudio
 LLM_PROVIDER=openai
 OPENAI_API_KEY=your_key_here
 

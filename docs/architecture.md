@@ -1,72 +1,54 @@
 # ViGiL — System Architecture
-
-## Pipeline Overview
+## Pipeline Overview (ViGiL v2.0)
 
 ```
                          EXE File Upload
-                               │
-                    ┌──────────▼──────────┐
-                    │  Sample Intake Agent │  Agent 1
-                    └──────────┬──────────┘
-                               │
-          ┌────────────────────┼────────────────────┐
-          ▼                    ▼                    ▼
- ┌────────────────┐  ┌─────────────────┐  ┌──────────────────┐
- │ Static Analysis│  │ Unpacking Agent  │  │ Threat Intel Agent│  Agents 2,3,10
- └────────┬───────┘  └────────┬────────┘  └──────────┬───────┘
-          │                   │                       │
-          ▼                   ▼                       │
- ┌────────────────┐  ┌─────────────────┐             │
- │Capability Agent│  │ CFG Extraction  │             │  Agents 4,5
- └────────┬───────┘  └────────┬────────┘             │
-          │                   │                       │
-          └───────────┬────────┘───────────────────────┘
-                      ▼
-            ┌──────────────────┐
-            │ Evasion Detection │  Agent 6
-            └──────────┬───────┘
-                       ▼
-            ┌──────────────────┐
-            │Emulation Analysis│  Agent 7
-            └──────────┬───────┘
-                       ▼
-            ┌──────────────────┐
-            │ Similarity Agent │  Agent 8
-            └──────────┬───────┘
-                       ▼
-            ┌──────────────────┐
-            │Family Clustering  │  Agent 9
-            └──────────┬───────┘
-                       ▼
-            ┌──────────────────┐
-            │MITRE ATT&CK Mapping│ Agent 11
-            └──────────┬───────┘
-                       ▼
-            ┌──────────────────┐
-            │ RAG Intelligence  │  Agent 12
-            └──────────┬───────┘
-                       ▼
-            ┌──────────────────┐
-            │LLM Decompilation  │  Agent 13
-            └──────────┬───────┘
-                       ▼
-            ┌──────────────────┐
-            │ YARA Generation   │  Agent 14
-            └──────────┬───────┘
-                       ▼
-            ┌──────────────────┐
-            │ATT&CK Navigator   │  Agent 15
-            └──────────┬───────┘
-                       ▼
-            ┌──────────────────┐
-            │   STIX Export    │  Agent 16
-            └──────────┬───────┘
-                       ▼
-            ┌──────────────────┐
-            │Report Generation  │  Agent 17
-            └──────────┬───────┘
-                       ▼
-     PDF / HTML / JSON / STIX / YARA / ATT&CK Layer
+                                │
+               ┌────────────────┴────────────────┐
+               │    Phase 1: Deterministic Tools │
+               └────────────────┬────────────────┘
+                                │
+          ┌─────────────────────┼─────────────────────┐
+          ▼                     ▼                     ▼
+ ┌────────────────┐    ┌─────────────────┐   ┌──────────────────┐
+ │ Static Analysis│    │ Unpacking Agent │   │ Threat Intel     │
+ └────────┬───────┘    └────────┬────────┘   └──────────┬───────┘
+          │                     │                       │
+          ▼                     ▼                       ▼
+ ┌────────────────┐    ┌─────────────────┐   ┌──────────────────┐
+ │ Capabilities   │    │ CFG Extraction  │   │ Evasion Detection│
+ └────────┬───────┘    └────────┬────────┘   └──────────┬───────┘
+          │                     │                       │
+          ▼                     ▼                       ▼
+ ┌────────────────┐    ┌─────────────────┐   ┌──────────────────┐
+ │ Emulation      │    │ Similarity Agent│   │ Family Clustering│
+ └────────┬───────┘    └────────┬────────┘   └──────────┬───────┘
+          └─────────────────────┼───────────────────────┘
+                                │
+               ┌────────────────┴────────────────┐
+               │  Phase 2: CrewAI Agentic AI     │
+               │ (Hierarchical Reasoning Engine) │
+               └────────────────┬────────────────┘
+                                │
+          ┌─────────────────────┼─────────────────────┐
+          ▼                     ▼                     ▼
+ ┌────────────────┐    ┌─────────────────┐   ┌──────────────────┐
+ │ Static PE AI   │    │ Behavioral AI   │   │ Threat Intel AI  │
+ └────────┬───────┘    └────────┬────────┘   └──────────┬───────┘
+          └─────────────────────┼───────────────────────┘
+                                │
+          ┌─────────────────────┼─────────────────────┐
+          ▼                     ▼                     ▼
+ ┌────────────────┐    ┌─────────────────┐   ┌──────────────────┐
+ │ Verdict Analyst│    │ Report Writer   │   │ Fallback Scripts │
+ └────────┬───────┘    └────────┬────────┘   └──────────┬───────┘
+          └─────────────────────┼───────────────────────┘
+                                │
+               ┌────────────────┴────────────────┐
+               │    Phase 3: Final Assembly      │
+               └────────────────┬────────────────┘
+                                │
+                     PDF / HTML / JSON / STIX
 ```
 
 ## Component Architecture
@@ -76,17 +58,19 @@ ViGiL/
 │
 ├── backend/                    Python / FastAPI
 │   ├── main.py                 REST API + WebSocket server
-│   ├── crew.py                 Pipeline orchestrator
+│   ├── crew.py                 Pipeline orchestrator (Phase 1 & 3)
+│   ├── vigil_crew.py           CrewAI agentic reasoning (Phase 2)
+│   ├── db.py                   SQLite persistence layer
 │   ├── config.py               Pydantic settings
 │   ├── models.py               Data schemas (all agent outputs)
-│   └── agents/                 17 agent modules
+│   └── agents/                 Deterministic tool wrappers
 │
 ├── frontend/                   React / Vite
 │   └── src/
 │       ├── pages/
 │       │   ├── Landing.jsx     Hero + upload zone
-│       │   ├── Analysis.jsx    Real-time pipeline view
-│       │   └── Report.jsx      Full forensic report
+│       │   ├── Analysis.jsx    Real-time pipeline view (Phases 1-3)
+│       │   └── Report.jsx      Full forensic report + AI Verdict
 │       ├── api.js              Backend client
 │       └── index.css           Design system
 │
@@ -96,12 +80,22 @@ ViGiL/
 ## Data Flow
 
 1. **Upload**: User drops a PE file on the Landing page
-2. **Job Creation**: FastAPI creates a job record and stores the file
-3. **Pipeline Start**: `crew.py` runs all 17 agents sequentially
-4. **WebSocket**: Each agent broadcasts progress events in real time
-5. **Frontend**: Analysis page shows live pipeline status and logs
-6. **Report**: When complete, user is redirected to the full forensic report
-7. **Downloads**: PDF, JSON, STIX, YARA, ATT&CK Layer available for download
+2. **Job Creation**: FastAPI creates a job record in SQLite and stores the file
+3. **Phase 1 (Tools)**: `crew.py` runs all deterministic tools in parallel using `asyncio.gather`
+4. **Phase 2 (CrewAI)**: `vigil_crew.py` instantiates 5 specialized LLM agents managed by a Hierarchical Manager to synthesize the evidence.
+5. **WebSocket**: Each tool and AI agent broadcasts progress events in real time.
+6. **Frontend**: Analysis page shows live pipeline status, logging, and agentic AI thinking.
+7. **Report**: Final verdict is rendered (AI verdict takes precedence), and artifacts are available for download.
+
+## Verdict Computation
+
+The final threat verdict is now primarily driven by the **CrewAI Verdict Analyst**. The deterministic tools provide the evidence (Threat Intel, CAPA, Evasion, etc.), and the AI synthesizes it into a JSON verdict containing:
+- Threat Level (malicious/suspicious/clean)
+- Confidence Score (0.0 to 1.0)
+- Malware Family
+- Executive Summary & Recommended Actions
+
+*If CrewAI is disabled or fails, the system falls back to a deterministic weighted computation.*
 
 ## Verdict Computation
 

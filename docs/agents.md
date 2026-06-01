@@ -260,12 +260,46 @@ Discovery, Execution, Persistence, Defense Evasion, Credential Access, Command a
 
 ---
 
+## Phase 2: CrewAI Agentic AI (Hierarchical Engine)
+
+The deterministic evidence from Phase 1 is passed into a Hierarchical CrewAI pipeline orchestrated by a Manager LLM. The manager delegates tasks to the following 5 specialized agents:
+
+### 1. Static PE Analyst
+**Role:** Deeply analyzes PE headers, entropy, sections, and structural anomalies.
+**Input:** Static analysis, unpacking results.
+**Output:** Assessment of structural malice (e.g., "Highly packed with RWX sections indicating a loader").
+
+### 2. Behavioral Analyst
+**Role:** Interprets emulation traces, evasion techniques, and capability flags (CAPA).
+**Input:** Emulation, evasion, capabilities, CFG.
+**Output:** Behavioral threat assessment (e.g., "Attempts process injection and anti-debug checks").
+
+### 3. Threat Intel Analyst
+**Role:** Correlates hashes, domains, and similarity clusters against known threat actors.
+**Input:** Threat Intel, similarity analysis, family clustering.
+**Output:** Attribution and external reputation context (e.g., "Matches AgentTesla cluster and flagged by VT").
+
+### 4. Verdict Analyst
+**Role:** Synthesizes the findings of the three specialized analysts to form a conclusive verdict.
+**Input:** Thoughts from Static, Behavioral, and Threat Intel agents.
+**Output:** Final Verdict (malicious/suspicious/clean), Confidence Score, Malware Family, and Key Evidence.
+
+### 5. Report Writer
+**Role:** Drafts an executive summary and defensive recommendations based on the final verdict.
+**Input:** The final verdict and key evidence.
+**Output:** Executive summary paragraph and bulleted recommended actions (e.g., "Isolate host, block C2 domains").
+
+---
+
+## Phase 3: Final Assembly
+
 ## Agent 17: Report Generation
 
 **File:** `backend/agents/report_generation.py`
 
-**Purpose:** Assemble all agent outputs into the final `VigilReport`.
+**Purpose:** Assemble all agent outputs and CrewAI verdict into the final `VigilReport`.
 
-**Verdict computation** uses weighted evidence scoring (see architecture.md).
+**Verdict computation** uses the CrewAI verdict. If CrewAI is disabled or fails, it falls back to weighted evidence scoring.
 
 **Output:** `report.json` + in-memory `VigilReport` for WebSocket delivery
+
