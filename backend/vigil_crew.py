@@ -367,8 +367,7 @@ def build_crew(evidence_context: str, llm: LLM) -> Crew:
     return Crew(
         agents=[static_analyst, behavioral_analyst, intel_analyst, verdict_analyst, report_writer],
         tasks=[task_static, task_behavioral, task_intel, task_verdict, task_report],
-        process=Process.hierarchical,
-        manager_llm=manager_llm,
+        process=Process.sequential,
         verbose=settings.crewai_verbose,
         memory=False,           # no persistent memory — each analysis is independent
         embedder=None,
@@ -383,7 +382,9 @@ def _parse_verdict_from_crew_output(crew_output: str, task_outputs: list) -> Age
     """Parse CrewAI task outputs into a structured AgenticVerdict."""
 
     def _extract_field(text: str, key: str) -> str:
-        m = re.search(rf"{key}:\s*(.+?)(?:\n[A-Z_]+:|$)", text, re.DOTALL | re.IGNORECASE)
+        clean_text = re.sub(r'\*\*([A-Z_]+)\*\*', r'\1', text)
+        clean_text = re.sub(r'\*\*([A-Z_]+):\*\*', r'\1:', clean_text)
+        m = re.search(rf"{key}:\s*(.+?)(?:\n[A-Z_]+:|$)", clean_text, re.DOTALL | re.IGNORECASE)
         return m.group(1).strip() if m else ""
 
     def _extract_indicators(text: str) -> list[str]:
@@ -474,7 +475,7 @@ def _parse_verdict_from_crew_output(crew_output: str, task_outputs: list) -> Age
         reasoning_chain=chain,
         llm_provider=settings.llm_provider,
         llm_model=getattr(settings, "lmstudio_model", "unknown"),
-        crew_process="hierarchical",
+        crew_process="sequential",
     )
 
 
@@ -510,5 +511,5 @@ async def run_crew(evidence: dict[str, Any]) -> AgenticVerdict:
             confidence_score=0.0,
             executive_summary=f"Agentic reasoning failed: {str(e)[:200]}",
             llm_provider=settings.llm_provider,
-            crew_process="hierarchical",
+            crew_process="sequential",
         )
