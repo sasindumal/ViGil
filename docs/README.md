@@ -1,0 +1,149 @@
+# ViGiL — Multi-Agent Malware Analysis Platform
+
+<div align="center">
+
+```
+██╗   ██╗██╗ ██████╗ ██╗██╗
+██║   ██║██║██╔════╝ ██║██║
+██║   ██║██║██║  ███╗██║██║
+╚██╗ ██╔╝██║██║   ██║██║██║
+ ╚████╔╝ ██║╚██████╔╝██║███████╗
+  ╚═══╝  ╚═╝ ╚═════╝ ╚═╝╚══════╝
+```
+
+**Evidence-Based Malware Analysis — Not ML Black Boxes**
+
+</div>
+
+---
+
+## Overview
+
+ViGiL is an analyst-focused malware triage and reverse-engineering platform. Instead of an ML model predicting "malicious/benign," every verdict is assembled from **17 specialized agents** operating sequentially on the submitted PE file.
+
+The verdict is produced from:
+- **Static evidence** — PE sections, imports, entropy, strings
+- **Emulation evidence** — behavioral trace without real execution
+- **Evasion indicators** — anti-VM, anti-debug, API obfuscation
+- **CAPA capabilities** — credential theft, injection, ransomware
+- **Threat intelligence** — VirusTotal, MalwareBazaar, AbuseIPDB, OTX
+- **Similarity analysis** — cosine distance against known malware families
+- **ATT&CK technique coverage** — mapped with confidence scores
+
+Every conclusion is traceable to specific, concrete evidence.
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+| Tool | Version | Required? |
+|------|---------|-----------|
+| Python | ≥ 3.11 | Yes |
+| Node.js | ≥ 18 | Yes |
+| npm | ≥ 9 | Yes |
+| pefile | via pip | Yes |
+| CAPA | binary | Optional (graceful fallback) |
+| FLOSS | binary | Optional (graceful fallback) |
+| Speakeasy | via pip | Optional (graceful fallback) |
+| angr | via pip | Optional (graceful fallback) |
+| UPX | binary | Optional |
+| rizin | binary | Optional |
+
+### 1. Clone & Configure
+
+```bash
+git clone https://github.com/your-org/ViGiL.git
+cd ViGiL
+cp .env.example .env
+# Edit .env with your API keys and LLM provider
+```
+
+### 2. Backend Setup
+
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### 3. Start Backend
+
+```bash
+cd backend
+python main.py
+# API available at http://localhost:8000
+# Swagger docs at http://localhost:8000/api/docs
+```
+
+### 4. Frontend Setup
+
+```bash
+cd frontend
+npm install
+npm run dev
+# App available at http://localhost:5173
+```
+
+---
+
+## Configuration
+
+All settings live in `.env` (copy from `.env.example`):
+
+```env
+# LLM Provider: openai | gemini | ollama
+LLM_PROVIDER=openai
+OPENAI_API_KEY=your_key_here
+
+# Threat Intelligence (optional — demo mode if empty)
+VIRUSTOTAL_API_KEY=
+MALWAREBAZAAR_API_KEY=
+
+# Vector Store: faiss (default) | qdrant
+VECTOR_STORE=faiss
+```
+
+> **Demo Mode**: If threat intel API keys are not set, the system uses realistic mock responses. All other agents run fully with real analysis.
+
+---
+
+## Architecture
+
+See [architecture.md](./architecture.md) for the full pipeline diagram.
+
+## Agents
+
+See [agents.md](./agents.md) for detailed documentation of all 17 agents.
+
+## API Reference
+
+See [api.md](./api.md) for the REST API and WebSocket documentation.
+
+## Tech Stack
+
+See [tech_stack.md](./tech_stack.md) for the full technology choices.
+
+---
+
+## Generated Artifacts
+
+For each analysis, ViGiL produces:
+
+| Artifact | Format | Description |
+|----------|--------|-------------|
+| `report.json` | JSON | Full structured report |
+| `report.pdf` | PDF | Client-side export |
+| `report.stix.json` | STIX 2.1 | OpenCTI/MISP/TAXII compatible |
+| `generated.yara` | YARA | Auto-generated hunting rules |
+| `attack_layer.json` | ATT&CK Navigator | Import into MITRE Navigator |
+| `cfg.json` | JSON | Control flow graph |
+| `callgraph.json` | JSON | API call graph |
+
+---
+
+## License
+
+MIT License. See LICENSE file.
