@@ -18,7 +18,6 @@ from typing import Any
 
 from crewai import Agent, Crew, Process, Task
 from crewai.project import CrewBase, agent, crew, task
-from langchain_openai import ChatOpenAI
 from loguru import logger
 
 from config import settings
@@ -27,44 +26,44 @@ from models import (
 )
 
 
+from crewai import LLM
+
 # ─────────────────────────────────────────────────────────────────────────────
 # LLM Factory — LM Studio via OpenAI-compatible endpoint
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_llm() -> ChatOpenAI:
-    """Return a LangChain LLM pointed at the configured provider."""
+def _build_llm() -> LLM:
+    """Return a CrewAI LLM pointed at the configured provider."""
     provider = settings.llm_provider.lower()
 
     if provider == "lmstudio":
-        return ChatOpenAI(
-            model=settings.lmstudio_model or "local-model",
+        return LLM(
+            model=f"openai/{settings.lmstudio_model or 'local-model'}",
             base_url=settings.lmstudio_base_url,
-            api_key="lm-studio",          # LM Studio ignores this
+            api_key="lm-studio",
             temperature=0.2,
             max_tokens=4096,
         )
     elif provider == "ollama":
-        return ChatOpenAI(
+        return LLM(
             model=f"ollama/{settings.ollama_model}",
             base_url=settings.ollama_base_url,
-            api_key="ollama",
             temperature=0.2,
-            max_tokens=4096,
         )
     elif provider == "gemini":
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        return ChatGoogleGenerativeAI(
-            model=settings.gemini_model,
-            google_api_key=settings.gemini_api_key,
+        return LLM(
+            model=f"gemini/{settings.gemini_model}",
+            api_key=settings.gemini_api_key,
             temperature=0.2,
         )
     else:  # openai default
-        return ChatOpenAI(
+        return LLM(
             model=settings.openai_model,
             api_key=settings.openai_api_key,
             temperature=0.2,
             max_tokens=4096,
         )
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -140,7 +139,7 @@ def _format_evidence(evidence: dict[str, Any]) -> str:
 # CrewAI Agents & Tasks
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_crew(evidence_context: str, llm: ChatOpenAI) -> Crew:
+def build_crew(evidence_context: str, llm: LLM) -> Crew:
     """Construct the ViGiL CrewAI crew with 5 specialized agents."""
 
     # ── Agent 1: Static PE Analyst ────────────────────────────────────────────

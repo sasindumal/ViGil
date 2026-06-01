@@ -302,8 +302,8 @@ async def websocket_progress(websocket: WebSocket, job_id: str):
     logger.info(f"[WebSocket] Client connected for job: {job_id}")
 
     # If job already completed, send the final status immediately
-    if job_id in jobs:
-        job = jobs[job_id]
+    job = await db.get_job(job_id)
+    if job:
         if job.status in (JobStatus.COMPLETED, JobStatus.FAILED):
             await websocket.send_text(json.dumps({
                 "type": "job_status",
