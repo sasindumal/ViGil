@@ -1,2 +1,0 @@
-[console_scripts]
-uir = uir.pipeline.cli:main

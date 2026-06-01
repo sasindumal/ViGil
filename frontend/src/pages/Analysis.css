@@ -1,0 +1,294 @@
+/* Analysis Page */
+
+.analysis-page {
+  min-height: 100vh;
+  background: var(--color-bg-primary);
+}
+
+.analysis-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  padding: 14px 0;
+  background: rgba(4, 8, 16, 0.9);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.analysis-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.analysis-meta {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.meta-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+}
+
+.analysis-main {
+  padding: 40px 0 80px;
+}
+
+.analysis-title-block {
+  margin-bottom: 24px;
+}
+
+.analysis-title {
+  font-size: 2rem;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.analysis-filename {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+/* ─── Grid Layout ────────────────────────────────────────────────────────── */
+.analysis-grid {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+@media (max-width: 900px) {
+  .analysis-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ─── Pipeline Panel ─────────────────────────────────────────────────────── */
+.pipeline-panel {
+  padding: 24px;
+  height: fit-content;
+  position: sticky;
+  top: 72px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+}
+
+.pipeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 24px;
+}
+
+.pipeline-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+  background: transparent;
+}
+
+.pipeline-item.active {
+  background: rgba(0, 229, 255, 0.06);
+  border-color: rgba(0, 229, 255, 0.2);
+}
+
+.pipeline-item.done {
+  opacity: 0.6;
+}
+
+.pipeline-item.done:hover {
+  opacity: 1;
+}
+
+.pipeline-item.failed-item {
+  background: rgba(255, 51, 102, 0.05);
+  border-color: rgba(255, 51, 102, 0.2);
+}
+
+.pipeline-index {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--color-text-dim);
+  font-weight: 700;
+  min-width: 20px;
+}
+
+.pipeline-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.pipeline-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 2px;
+}
+
+.pipeline-desc {
+  font-size: 0.7rem;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pipeline-status {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.pipeline-stats {
+  display: flex;
+  justify-content: space-around;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.pipeline-stat {
+  text-align: center;
+}
+
+.pipeline-stat .stat-number {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 800;
+  font-family: var(--font-mono);
+}
+
+.pipeline-stat .stat-label {
+  font-size: 0.65rem;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* ─── Spinners ───────────────────────────────────────────────────────────── */
+.agent-spinner {
+  color: var(--color-cyan);
+  animation: spin 1s linear infinite;
+}
+
+.agent-pending-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-dim);
+  margin: 4px;
+}
+
+/* ─── Log Panel ──────────────────────────────────────────────────────────── */
+.log-panel {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.log-output {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(0, 229, 255, 0.08);
+  border-radius: 10px;
+  padding: 16px;
+  height: 400px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.log-waiting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-dim);
+}
+
+.log-entry {
+  display: flex;
+  gap: 12px;
+  padding: 3px 0;
+  line-height: 1.5;
+}
+
+.log-time {
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+}
+
+.log-msg {
+  color: var(--color-text-secondary);
+  word-break: break-all;
+}
+
+/* ─── Current Result ─────────────────────────────────────────────────────── */
+.current-result {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(0, 229, 255, 0.1);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.result-json {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--color-cyan-dim);
+  overflow-x: auto;
+  line-height: 1.6;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* ─── Banners ────────────────────────────────────────────────────────────── */
+.completed-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 24px;
+  background: rgba(0, 255, 136, 0.08);
+  border: 1px solid rgba(0, 255, 136, 0.2);
+  border-radius: 14px;
+  color: var(--color-green);
+}
+
+.completed-title {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.completed-sub {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.failed-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 24px;
+  background: rgba(255, 51, 102, 0.08);
+  border: 1px solid rgba(255, 51, 102, 0.2);
+  border-radius: 14px;
+  color: var(--color-red);
+}
+
+.failed-title {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.failed-sub {
+  font-size: 0.8rem;
+  opacity: 0.7;
+  color: var(--color-text-secondary);
+}
