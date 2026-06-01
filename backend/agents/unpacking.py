@@ -1,10 +1,11 @@
 """
 ViGiL — Agent 3: Multi-Stage Unpacking Agent
-Detects packers and attempts emulated unpacking via Speakeasy / Qiling / Unicorn.
+Detects packers and attempts emulated unpacking via Speakeasy / UPX.
 """
 from __future__ import annotations
 
 import math
+import signal
 import subprocess
 from pathlib import Path
 
@@ -15,19 +16,20 @@ from models import UnpackingResult
 
 # Known packer signatures (magic bytes / section names)
 PACKER_SIGNATURES = {
-    "UPX": [b"UPX0", b"UPX1", b"UPX2", b"UPX!"],
-    "MPRESS": [b".MPRESS1", b".MPRESS2"],
-    "ASPack": [b".aspack", b".adata"],
-    "Themida": [b".themida", b".winlice"],
+    "UPX":       [b"UPX0", b"UPX1", b"UPX2", b"UPX!"],
+    "MPRESS":    [b".MPRESS1", b".MPRESS2"],
+    "ASPack":    [b".aspack", b".adata"],
+    "Themida":   [b".themida", b".winlice"],
     "VMProtect": [b".vmp0", b".vmp1", b".vmp2"],
-    "Enigma": [b".enigma1", b".enigma2"],
+    "Enigma":    [b".enigma1", b".enigma2"],
     "PECompact": [b"PEC2"],
-    "NsPack": [b"nsp0", b"nsp1"],
-    "ExeStealth": [b"ExeSt"],
+    "NsPack":    [b"nsp0", b"nsp1"],
+    "ExeStealth":[b"ExeSt"],
 }
 
 HIGH_ENTROPY_THRESHOLD = 7.0
-SUSPICIOUS_IMPORT_COUNT = 5  # fewer than this = likely packed
+SUSPICIOUS_IMPORT_COUNT = 5   # fewer than this = likely packed
+HEADER_SCAN_BYTES = 4096      # scan only the first 4 KB for signatures (fast)
 
 
 def _entropy(data: bytes) -> float:
@@ -40,19 +42,20 @@ def _entropy(data: bytes) -> float:
     return -sum((c / n) * math.log2(c / n) for c in freq if c)
 
 
-def _detect_packer_signatures(raw: bytes) -> list[str]:
-    """Check for known packer byte signatures."""
+def _detect_packer_signatures(header: bytes) -> list[str]:
+    """Check for known packer byte signatures in the file header only (fast)."""
     found = []
+    header_lower = header.lower()
     for packer, sigs in PACKER_SIGNATURES.items():
         for sig in sigs:
-            if sig.lower() in raw.lower():
+            if sig.lower() in header_lower:
                 found.append(packer)
                 break
     return found
 
 
 def _check_pe_heuristics(file_path: Path) -> dict:
-    """PE-based heuristics: entropy, import count, RWX sections."""
+    """PE-based heuristics: section entropy, import count, RWX sections."""
     result = {
         "high_entropy_sections": [],
         "rwx_sections": False,
@@ -62,15 +65,16 @@ def _check_pe_heuristics(file_path: Path) -> dict:
     try:
         import pefile
 
-        pe = pefile.PE(str(file_path))
+        pe = pefile.PE(str(file_path), fast_load=True)   # fast_load skips non-essential dirs
+        pe.parse_data_directories(directories=[
+            pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_IMPORT"],
+        ])
 
-        # Import count
         if hasattr(pe, "DIRECTORY_ENTRY_IMPORT"):
             result["import_count"] = len(pe.DIRECTORY_ENTRY_IMPORT)
         else:
             result["import_count"] = 0
 
-        # Sections
         for s in pe.sections:
             data = s.get_data()
             ent = _entropy(data)
@@ -80,7 +84,6 @@ def _check_pe_heuristics(file_path: Path) -> dict:
             if ent > HIGH_ENTROPY_THRESHOLD:
                 result["high_entropy_sections"].append(name)
 
-            # RWX: IMAGE_SCN_MEM_READ | WRITE | EXECUTE
             if (s.Characteristics & 0xE0000000) == 0xE0000000:
                 result["rwx_sections"] = True
 
@@ -104,17 +107,29 @@ def _try_upx_unpack(file_path: Path, output_dir: Path) -> bool:
         return False
 
 
-def _try_speakeasy_emulation(file_path: Path) -> dict:
-    """Attempt emulated unpacking via Speakeasy."""
+def _try_speakeasy_emulation(file_path: Path, timeout_secs: int = 45) -> dict:
+    """Attempt emulated unpacking via Speakeasy with a hard timeout."""
+    def _handler(signum, frame):
+        raise TimeoutError(f"Speakeasy unpacking exceeded {timeout_secs}s")
+
     try:
         import speakeasy  # type: ignore
 
-        se = speakeasy.Speakeasy()
-        module = se.load_module(str(file_path))
-        se.run_module(module)
-        api_calls = [c["api"]["name"] for c in se.get_report().get("apis", [])]
+        old = signal.signal(signal.SIGALRM, _handler)
+        signal.alarm(timeout_secs)
+        try:
+            se = speakeasy.Speakeasy()
+            module = se.load_module(str(file_path))
+            se.run_module(module)
+            api_calls = [c["api"]["name"] for c in se.get_report().get("apis", [])]
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old)
+
         return {"success": True, "api_calls": api_calls[:50]}
-    except ImportError:
+    except TimeoutError as e:
+        logger.debug(f"[Unpacking] {e} — skipping speakeasy unpack")
+    except (ImportError, ModuleNotFoundError):
         logger.debug("[Unpacking] Speakeasy not installed")
     except Exception as e:
         logger.debug(f"[Unpacking] Speakeasy emulation failed: {e}")
@@ -124,13 +139,14 @@ def _try_speakeasy_emulation(file_path: Path) -> dict:
 def run_unpacking_analysis(file_path: Path, output_dir: Path) -> UnpackingResult:
     logger.info(f"[Unpacking] Analyzing: {file_path.name}")
 
+    # Read only the header for signature detection — much faster than full read
     with open(file_path, "rb") as f:
-        raw = f.read()
+        header = f.read(HEADER_SCAN_BYTES)
 
-    # Stage 1: Signature detection
-    detected_packers = _detect_packer_signatures(raw)
+    # Stage 1: Signature detection (header only)
+    detected_packers = _detect_packer_signatures(header)
 
-    # Stage 2: PE heuristics
+    # Stage 2: PE heuristics (fast_load=True)
     heuristics = _check_pe_heuristics(file_path)
     is_packed_heuristic = (
         bool(heuristics["high_entropy_sections"])
@@ -149,15 +165,14 @@ def run_unpacking_analysis(file_path: Path, output_dir: Path) -> UnpackingResult
         logger.info(f"[Unpacking] Detected packer: {packer_name}")
         layers = 1
 
-        # Stage 2a: UPX unpack
+        # Stage 2a: UPX unpack (fast, binary-level)
         if "UPX" in (detected_packers or []):
             unpacked = _try_upx_unpack(file_path, output_dir)
             if unpacked:
-                layers = 1
                 payload_recovered = True
                 layer_details.append({"layer": 1, "packer": "UPX", "unpacked": True})
 
-        # Stage 2b: Emulation
+        # Stage 2b: Speakeasy emulation (only if not already recovered, with timeout)
         if not payload_recovered:
             emu_result = _try_speakeasy_emulation(file_path)
             if emu_result["success"]:
