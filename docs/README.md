@@ -1,5 +1,7 @@
 # ViGiL — Multi-Agent Malware Analysis Platform
 
+> **Demo mode is on by default** — no API keys or tools required to run the platform. See [real-mode.md](./real-mode.md) to switch any layer to real data.
+
 <div align="center">
 
 ```
@@ -110,21 +112,16 @@ VECTOR_STORE=faiss
 
 ---
 
-## Architecture
+## Documentation
 
-See [architecture.md](./architecture.md) for the full pipeline diagram.
-
-## Agents
-
-See [agents.md](./agents.md) for detailed documentation of all 17 agents.
-
-## API Reference
-
-See [api.md](./api.md) for the REST API and WebSocket documentation.
-
-## Tech Stack
-
-See [tech_stack.md](./tech_stack.md) for the full technology choices.
+| Guide | Description |
+|-------|------------|
+| [architecture.md](./architecture.md) | Pipeline diagram and data flow |
+| [agents.md](./agents.md) | All 17 agents documented |
+| [api.md](./api.md) | REST API and WebSocket reference |
+| [setup.md](./setup.md) | Step-by-step installation guide |
+| [tech_stack.md](./tech_stack.md) | Technology choices and rationale |
+| [real-mode.md](./real-mode.md) | **How to switch from mock to real data** |
 
 ---
 

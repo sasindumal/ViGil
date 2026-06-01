@@ -1,5 +1,8 @@
 # ViGiL — Setup Guide
 
+> **New to ViGiL?** The platform runs in demo mode out of the box — no API keys needed.
+> Once running, see [real-mode.md](./real-mode.md) to enable real threat intel, LLMs, and analysis tools.
+
 ## Development Setup (Recommended)
 
 ### Step 1: Clone Repository
