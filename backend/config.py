@@ -18,13 +18,16 @@ class VigilSettings(BaseSettings):
     )
 
     # ── LLM ──────────────────────────────────────────────────────────────────
-    llm_provider: str = Field(default="openai", description="openai | gemini | ollama")
+    llm_provider: str = Field(default="openai", description="openai | gemini | ollama | lmstudio")
     openai_api_key: str = Field(default="", description="OpenAI API key")
     openai_model: str = Field(default="gpt-4o")
     google_api_key: str = Field(default="", description="Google Gemini API key")
     gemini_model: str = Field(default="gemini-2.0-flash")
     ollama_base_url: str = Field(default="http://localhost:11434")
     ollama_model: str = Field(default="llama3.2")
+    # LM Studio — OpenAI-compatible local server
+    lmstudio_base_url: str = Field(default="http://localhost:1234/v1")
+    lmstudio_model: str = Field(default="local-model")  # matches the model loaded in LM Studio UI
 
     # ── Threat Intel ─────────────────────────────────────────────────────────
     virustotal_api_key: str = Field(default="")
@@ -55,11 +58,13 @@ class VigilSettings(BaseSettings):
                 "openai": self.openai_model,
                 "gemini": self.gemini_model,
                 "ollama": self.ollama_model,
+                "lmstudio": self.lmstudio_model,
             }.get(self.llm_provider, self.openai_model),
             "has_key": {
                 "openai": bool(self.openai_api_key),
                 "gemini": bool(self.google_api_key),
                 "ollama": True,
+                "lmstudio": True,  # no API key needed
             }.get(self.llm_provider, False),
         }
 

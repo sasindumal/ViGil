@@ -11,7 +11,7 @@
 | Layer | Mock Behaviour | What Makes It Real |
 |-------|---------------|-------------------|
 | **Threat Intelligence** | Returns hardcoded "42/73, RedLine" | Add API keys to `.env` |
-| **LLM Analysis** | Returns a static template sentence | Set `LLM_PROVIDER` + API key or install Ollama |
+| **LLM Analysis** | Returns a static template sentence | Set `LLM_PROVIDER` + API key or install Ollama/LM Studio |
 | **Capability Detection** | Guesses from import table | Install `capa` binary |
 | **Behavioral Emulation** | Infers from static imports | Install `speakeasy-emulator` |
 | **CFG Extraction** | Returns empty function list | Install `angr` or `rizin` |
@@ -181,6 +181,47 @@ curl http://localhost:11434/api/tags
 ```
 
 > **Recommended:** Ollama with `llama3.2` gives strong technical analysis with zero cost and zero data sharing. Analysis takes ~5–15 seconds per sample on Apple Silicon.
+
+### Option D — LM Studio (Local, Free, No API Key, GUI)
+
+LM Studio provides a desktop app with a built-in model browser and local server. Good choice if you prefer a GUI over a CLI.
+
+**Step 1 — Install LM Studio**
+
+Download from: https://lmstudio.ai  
+Available for macOS (Apple Silicon + Intel), Windows, Linux.
+
+**Step 2 — Download a Model**
+
+Inside LM Studio: open the **Discover** tab → search for a model → click Download.  
+Recommended for malware analysis (good reasoning, fits in 8GB RAM):
+
+| Model | Size | Notes |
+|-------|------|-------|
+| `Llama-3.2-3B-Instruct` | 2GB | Fast, light |
+| `Llama-3.1-8B-Instruct` | 5GB | Best quality on ≤16GB RAM |
+| `Mistral-7B-Instruct` | 4GB | Good general reasoning |
+| `Phi-3-mini-4k-instruct` | 2.4GB | Very fast on CPU |
+
+**Step 3 — Start the Local Server**
+
+Inside LM Studio: go to **Local Server** tab → select your model → click **Start Server**.  
+Default URL: `http://localhost:1234/v1`
+
+**Step 4 — Configure `.env`**
+
+```env
+LLM_PROVIDER=lmstudio
+LMSTUDIO_BASE_URL=http://localhost:1234/v1
+
+# IMPORTANT: this must match exactly the model name shown in LM Studio's
+# Local Server tab — copy it from the dropdown, e.g.:
+LMSTUDIO_MODEL=lmstudio-community/Meta-Llama-3.1-8B-Instruct-GGUF
+```
+
+> **How to find the exact model name:** In LM Studio → Local Server tab, the model identifier is shown beneath the model dropdown. Copy that full string into `LMSTUDIO_MODEL`.
+
+**No SDK install needed** — LM Studio's API is OpenAI-compatible, and the `openai` Python package is already installed in the venv.
 
 ---
 

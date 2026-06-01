@@ -13,7 +13,7 @@
 | CFG Analysis | angr + rizin | angr for deep analysis; rizin as lightweight fallback |
 | Clustering | HDBSCAN | Density-based clustering for novel family detection |
 | Vector Search | FAISS (demo) → Qdrant (prod) | FAISS for zero-config; Qdrant for persistent corpus |
-| LLM Integration | OpenAI / Gemini / Ollama | Configurable — supports local models |
+| LLM Integration | OpenAI / Gemini / Ollama / LM Studio | Configurable — supports cloud and local models including LM Studio (OpenAI-compatible API) |
 | STIX | stix2 | OASIS STIX 2.1 compliant exports |
 | YARA | yara-python | Native YARA rule validation |
 | Settings | pydantic-settings | Type-safe environment configuration |

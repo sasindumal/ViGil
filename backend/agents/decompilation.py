@@ -124,6 +124,24 @@ Focus on the specific Windows API calls and their security implications."""
                 )
                 if resp.status_code == 200:
                     return resp.json().get("response", "").strip()
+
+        elif provider == "lmstudio":
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(
+                base_url=settings.lmstudio_base_url,
+                api_key="lm-studio",
+            )
+            response = await client.chat.completions.create(
+                model=settings.lmstudio_model,
+                messages=[
+                    {"role": "system", "content": "You are a malware reverse engineer. Be concise and technical."},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=200,
+                temperature=0.1,
+            )
+            return response.choices[0].message.content.strip()
+
     except Exception as e:
         logger.warning(f"[Decompilation] LLM error: {e}")
 

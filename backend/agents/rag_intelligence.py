@@ -74,6 +74,8 @@ async def _call_llm(prompt: str) -> str:
         return await _call_gemini(prompt)
     elif provider == "ollama":
         return await _call_ollama(prompt)
+    elif provider == "lmstudio":
+        return await _call_lmstudio(prompt)
     else:
         return _static_explanation(prompt)
 
@@ -134,6 +136,36 @@ async def _call_ollama(prompt: str) -> str:
                 return resp.json().get("response", "").strip()
     except Exception as e:
         logger.warning(f"[RAG] Ollama error: {e}")
+    return _static_explanation(prompt)
+
+
+async def _call_lmstudio(prompt: str) -> str:
+    """LM Studio uses an OpenAI-compatible API — no key required."""
+    try:
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(
+            base_url=settings.lmstudio_base_url,
+            api_key="lm-studio",  # LM Studio ignores the key value; any non-empty string works
+        )
+        response = await client.chat.completions.create(
+            model=settings.lmstudio_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a malware analyst. Provide concise, technical, evidence-backed "
+                        "explanations. Base your analysis on the provided evidence only."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=500,
+            temperature=0.1,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.warning(f"[RAG] LM Studio error: {e}")
     return _static_explanation(prompt)
 
 
