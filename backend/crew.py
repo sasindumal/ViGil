@@ -51,6 +51,8 @@ AGENTS = [
     "Similarity Analysis",
     "Family Clustering",
     "MITRE ATT&CK Mapping",
+    "RAG Intelligence",
+    "LLM Decompilation",
     "YARA Generation",
     "ATT&CK Navigator Export",
     "STIX Export",
@@ -325,7 +327,7 @@ async def run_pipeline(
             "[AI] Verdict Analyst",
             "[AI] Report Writer",
         ]
-        agent_base_idx = 14  # index after STIX
+        agent_base_idx = 16  # index after STIX
         for i, name in enumerate(crew_agent_names):
             await _emit(progress_callback, job_id, name, agent_base_idx + i, "started",
                         f"LLM agent reasoning... ({settings.llm_provider})")
@@ -348,6 +350,7 @@ async def run_pipeline(
                     summary = {
                         "confidence": thought.confidence,
                         "indicators": thought.key_indicators[:3],
+                        "reasoning": thought.findings,
                     }
                 await _emit(progress_callback, job_id, name, agent_base_idx + i, "completed",
                             thought.findings[:120] if thought else "Analysis complete",
