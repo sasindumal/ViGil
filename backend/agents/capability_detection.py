@@ -5,13 +5,22 @@ Uses CAPA to identify malware capabilities, with mock fallback for demo.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Optional
 
 from loguru import logger
 
+from config import settings
 from models import CapabilityResult
+
+# Resolve capa binary — try $HOME/bin first, then PATH
+_CAPA_BINARY = (
+    Path(os.path.expanduser("~/bin/capa"))
+    if Path(os.path.expanduser("~/bin/capa")).exists()
+    else "capa"
+)
 
 
 CAPABILITY_KEYWORDS = {
@@ -29,10 +38,10 @@ def _run_capa(file_path: Path) -> Optional[dict]:
     """Run CAPA binary and parse JSON output."""
     try:
         result = subprocess.run(
-            ["capa", "--json", str(file_path)],
+            [str(_CAPA_BINARY), "--json", str(file_path)],
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=settings.capa_timeout,
         )
         if result.returncode == 0:
             return json.loads(result.stdout)
@@ -40,7 +49,7 @@ def _run_capa(file_path: Path) -> Optional[dict]:
     except FileNotFoundError:
         logger.warning("[CAPA] capa binary not found — using heuristic analysis")
     except subprocess.TimeoutExpired:
-        logger.warning("[CAPA] CAPA timed out")
+        logger.warning(f"[CAPA] CAPA timed out after {settings.capa_timeout}s")
     except json.JSONDecodeError as e:
         logger.warning(f"[CAPA] JSON parse error: {e}")
     return None

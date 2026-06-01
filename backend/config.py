@@ -9,10 +9,13 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
+# .env lives at the project root (one level above this backend/ directory)
+_ROOT_ENV = Path(__file__).parent.parent / ".env"
+
 
 class VigilSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_ROOT_ENV),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -49,6 +52,7 @@ class VigilSettings(BaseSettings):
     upload_dir: Path = Field(default=Path("./uploads"))
     reports_dir: Path = Field(default=Path("./reports"))
     demo_mode: bool = Field(default=True)
+    capa_timeout: int = Field(default=600, description="CAPA analysis timeout in seconds")
 
     def get_llm_provider_info(self) -> dict:
         """Return active LLM configuration summary."""
