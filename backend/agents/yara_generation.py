@@ -88,7 +88,7 @@ def _make_family_rule(
         apis = cap_map.get(cap.lower(), [])
         api_strings.extend(apis)
 
-    for i, api in enumerate(set(api_strings)[:6]):
+    for i, api in enumerate(list(set(api_strings))[:6]):
         strings_block += f'        $api_{i} = "{api}" ascii\n'
 
     rule_content = f"""rule ViGiL_{family_clean}_Family
@@ -177,7 +177,7 @@ def run_yara_generation(
 
     # Generate family rule if family identified
     if family and family.lower() not in ("unknown", "novel / unknown family"):
-        family_rule = _make_family_rule(sha256, family, capabilities, techniques)
+        family_rule = _make_family_rule(family, sha256, capabilities, techniques)
         rules.append(family_rule)
 
     # Generate sample rule
