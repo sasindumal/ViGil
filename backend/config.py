@@ -54,6 +54,10 @@ class VigilSettings(BaseSettings):
     demo_mode: bool = Field(default=True)
     capa_timeout: int = Field(default=600, description="CAPA analysis timeout in seconds")
 
+    # ── CrewAI Agentic Reasoning ──────────────────────────────────────────────
+    crewai_enabled: bool = Field(default=True, description="Enable CrewAI agentic reasoning phase")
+    crewai_verbose: bool = Field(default=False, description="Verbose CrewAI agent output to console")
+
     def get_llm_provider_info(self) -> dict:
         """Return active LLM configuration summary."""
         return {

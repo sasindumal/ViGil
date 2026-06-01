@@ -279,6 +279,9 @@ class VigilReport(BaseModel):
     # Generated artifacts
     artifacts: dict[str, str] = Field(default_factory=dict)
 
+    # CrewAI agentic verdict (populated after Phase 2 reasoning)
+    agentic_verdict: Optional["AgenticVerdict"] = None
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # API Request / Response Models
@@ -304,3 +307,41 @@ class AgentProgressEvent(BaseModel):
     message: str
     timestamp: str
     result_summary: Optional[dict] = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CrewAI Agentic Reasoning Models
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AgentThought(BaseModel):
+    """A single LLM agent's reasoning output."""
+    agent_role: str
+    findings: str          # free-text LLM reasoning
+    key_indicators: list[str] = Field(default_factory=list)
+    confidence: float = 0.5
+    recommended_action: Optional[str] = None
+
+
+class ReasoningChain(BaseModel):
+    """Full chain of evidence from all CrewAI agents."""
+    static_analysis_thought: Optional[AgentThought] = None
+    behavioral_thought: Optional[AgentThought] = None
+    threat_intel_thought: Optional[AgentThought] = None
+    verdict_thought: Optional[AgentThought] = None
+    report_thought: Optional[AgentThought] = None
+
+
+class AgenticVerdict(BaseModel):
+    """Final structured verdict produced by the CrewAI crew."""
+    threat_level: ThreatLevel
+    confidence_score: float = 0.5
+    malware_family: Optional[str] = None
+    malware_type: Optional[str] = None   # ransomware | trojan | rat | stealer | etc.
+    threat_actor: Optional[str] = None
+    executive_summary: str = ""
+    key_evidence: list[str] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+    reasoning_chain: ReasoningChain = Field(default_factory=ReasoningChain)
+    llm_provider: str = "unknown"
+    llm_model: str = "unknown"
+    crew_process: str = "hierarchical"

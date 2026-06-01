@@ -1,6 +1,7 @@
 """
 ViGiL — Analysis Pipeline Orchestrator
-Runs all 17 agents sequentially, broadcasting WebSocket progress events.
+Phase 1: Deterministic tools collect evidence (parallel where possible)
+Phase 2: CrewAI agents reason over evidence (hierarchical LLM crew)
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ from typing import Callable, Awaitable
 
 from loguru import logger
 
+from config import settings
 from models import (
     VigilReport, AgentProgressEvent,
     SampleIntakeResult, StaticAnalysisResult,
@@ -33,9 +35,11 @@ from agents.yara_generation import run_yara_generation
 from agents.attack_navigator import run_attack_navigator_export
 from agents.stix_export import run_stix_export
 from agents.report_generation import generate_report
+from vigil_crew import run_crew
 
 
 AGENTS = [
+    # Phase 1 — Deterministic tools
     "Sample Intake",
     "Static Analysis",
     "Unpacking",
@@ -47,11 +51,16 @@ AGENTS = [
     "Similarity Analysis",
     "Family Clustering",
     "MITRE ATT&CK Mapping",
-    "RAG Intelligence",
-    "LLM Decompilation",
     "YARA Generation",
     "ATT&CK Navigator Export",
     "STIX Export",
+    # Phase 2 — CrewAI agentic reasoning
+    "[AI] Static PE Analyst",
+    "[AI] Behavioral Analyst",
+    "[AI] Threat Intel Analyst",
+    "[AI] Verdict Analyst",
+    "[AI] Report Writer",
+    # Phase 3 — Final assembly
     "Report Generation",
 ]
 
@@ -290,8 +299,72 @@ async def run_pipeline(
         {"objects": stix_result.objects_generated}
     )
 
-    # ── Agent 17 (run order 16): Report Generation ────────────────────────────
-    await _emit(progress_callback, job_id, "Report Generation", 16, "started", "Assembling final forensic report...")
+    # ── Phase 2: CrewAI Agentic Reasoning ────────────────────────────────────
+    agentic_verdict = None
+    if settings.crewai_enabled:
+        # Assemble all collected evidence into a dict for the crew
+        evidence = {
+            "filename": filename,
+            "sample": sample_result.model_dump(),
+            "static": static_result.model_dump(),
+            "unpacking": unpack_result.model_dump(),
+            "capabilities": cap_result.capabilities,
+            "evasion": evasion_result.model_dump(),
+            "emulation": emu_result.model_dump(),
+            "threat_intel": intel_result.model_dump(),
+            "mitre_techniques": [t.model_dump() for t in mitre_result.techniques],
+            "similarity": sim_result.model_dump(),
+            "clustering": cluster_result.model_dump(),
+        }
+
+        # Emit per-agent start events so the UI shows real-time thinking
+        crew_agent_names = [
+            "[AI] Static PE Analyst",
+            "[AI] Behavioral Analyst",
+            "[AI] Threat Intel Analyst",
+            "[AI] Verdict Analyst",
+            "[AI] Report Writer",
+        ]
+        agent_base_idx = 14  # index after STIX
+        for i, name in enumerate(crew_agent_names):
+            await _emit(progress_callback, job_id, name, agent_base_idx + i, "started",
+                        f"LLM agent reasoning... ({settings.llm_provider})")
+
+        try:
+            agentic_verdict = await run_crew(evidence)
+
+            # Emit completed for each agent with its findings
+            chain = agentic_verdict.reasoning_chain
+            thoughts = [
+                chain.static_analysis_thought,
+                chain.behavioral_thought,
+                chain.threat_intel_thought,
+                chain.verdict_thought,
+                chain.report_thought,
+            ]
+            for i, (name, thought) in enumerate(zip(crew_agent_names, thoughts)):
+                summary = {}
+                if thought:
+                    summary = {
+                        "confidence": thought.confidence,
+                        "indicators": thought.key_indicators[:3],
+                    }
+                await _emit(progress_callback, job_id, name, agent_base_idx + i, "completed",
+                            thought.findings[:120] if thought else "Analysis complete",
+                            summary)
+
+            logger.info(f"[CrewAI] Verdict: {agentic_verdict.threat_level.value} "
+                        f"({agentic_verdict.confidence_score:.0%}) — {agentic_verdict.malware_family or 'unknown family'}")
+
+        except Exception as e:
+            logger.error(f"[CrewAI] Phase 2 failed: {e}")
+            for i, name in enumerate(crew_agent_names):
+                await _emit(progress_callback, job_id, name, agent_base_idx + i, "failed",
+                            f"Agent failed: {str(e)[:80]}")
+
+    # ── Final Report ──────────────────────────────────────────────────────────
+    await _emit(progress_callback, job_id, "Report Generation",
+                len(AGENTS) - 1, "started", "Assembling final forensic report...")
     duration = time.time() - start_time
 
     # Collect artifact paths
@@ -314,10 +387,25 @@ async def run_pipeline(
         artifacts, output_dir
     )
 
-    await _emit(progress_callback, job_id, "Report Generation", 16, "completed",
-        f"Analysis complete — Threat level: {final_report.threat_level.value.upper()} ({final_report.confidence_score:.0%} confidence)",
-        {"threat_level": final_report.threat_level.value, "confidence": final_report.confidence_score}
-    )
+    # Attach CrewAI verdict to the report
+    if agentic_verdict:
+        final_report.agentic_verdict = agentic_verdict
+        # Upgrade threat level and confidence if CrewAI disagrees more conservatively
+        if agentic_verdict.confidence_score > final_report.confidence_score:
+            final_report.confidence_score = agentic_verdict.confidence_score
+            final_report.threat_level = agentic_verdict.threat_level
+        if agentic_verdict.executive_summary:
+            final_report.verdict_reasoning = (
+                [agentic_verdict.executive_summary] + final_report.verdict_reasoning
+            )[:10]
+
+    await _emit(progress_callback, job_id, "Report Generation",
+                len(AGENTS) - 1, "completed",
+                f"Analysis complete — Threat level: {final_report.threat_level.value.upper()} "
+                f"({final_report.confidence_score:.0%} confidence) | "
+                f"AI: {agentic_verdict.malware_family or 'N/A' if agentic_verdict else 'skipped'}",
+                {"threat_level": final_report.threat_level.value, "confidence": final_report.confidence_score,
+                 "agentic": agentic_verdict is not None})
 
     logger.info(f"[Pipeline] Completed in {duration:.1f}s — Verdict: {final_report.threat_level.value}")
     return final_report

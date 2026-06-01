@@ -22,6 +22,7 @@ from loguru import logger
 from config import settings
 from models import AnalysisJob, JobStatus, AgentProgressEvent, VigilReport
 from crew import run_pipeline
+import db
 
 # ─────────────────────────────────────────────────────────────────────────────
 # App Setup
@@ -44,11 +45,9 @@ app.add_middleware(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# In-memory job store (replace with Redis in production)
+# WebSocket connection registry (in-memory only — no persistence needed)
 # ─────────────────────────────────────────────────────────────────────────────
 
-jobs: dict[str, AnalysisJob] = {}
-reports: dict[str, VigilReport] = {}
 ws_connections: dict[str, list[WebSocket]] = {}
 
 
@@ -80,7 +79,7 @@ async def run_analysis_task(job_id: str, file_path: Path):
     output_dir = settings.reports_dir / job_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    jobs[job_id].status = JobStatus.RUNNING
+    await db.update_job(job_id, status="running")
 
     try:
         report = await run_pipeline(
@@ -89,24 +88,28 @@ async def run_analysis_task(job_id: str, file_path: Path):
             output_dir=output_dir,
             progress_callback=broadcast_progress,
         )
-        reports[job_id] = report
-        jobs[job_id].status = JobStatus.COMPLETED
-        jobs[job_id].completed_at = datetime.now(timezone.utc).isoformat()
-        jobs[job_id].progress = 100
+        report_json = report.model_dump_json()
+        await db.save_report(job_id, report_json)
+        await db.update_job(job_id,
+            status="completed",
+            progress=100,
+            completed_at=datetime.now(timezone.utc).isoformat()
+        )
 
     except Exception as e:
         logger.exception(f"[Server] Analysis failed for job {job_id}: {e}")
-        jobs[job_id].status = JobStatus.FAILED
-        jobs[job_id].error = str(e)
-        jobs[job_id].completed_at = datetime.now(timezone.utc).isoformat()
+        await db.update_job(job_id,
+            status="failed",
+            error=str(e)[:500],
+            completed_at=datetime.now(timezone.utc).isoformat()
+        )
 
-        # Send failure event to clients
         try:
             event = AgentProgressEvent(
                 job_id=job_id,
                 agent_name="Pipeline",
                 agent_index=0,
-                total_agents=17,
+                total_agents=22,
                 status="failed",
                 message=f"Analysis failed: {str(e)[:200]}",
                 timestamp=datetime.now(timezone.utc).isoformat(),
@@ -125,10 +128,11 @@ async def health():
     """Health check endpoint."""
     return {
         "status": "ok",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "llm_provider": settings.llm_provider,
         "threat_intel_enabled": settings.threat_intel_enabled,
         "demo_mode": settings.demo_mode,
+        "crewai_enabled": settings.crewai_enabled,
     }
 
 
@@ -163,15 +167,23 @@ async def submit_analysis(file: UploadFile = File(...)):
     async with aiofiles.open(file_path, "wb") as f:
         await f.write(content)
 
-    # Create job record
+    # Persist job to SQLite
+    created_at = datetime.now(timezone.utc).isoformat()
+    await db.save_job({
+        "job_id": job_id,
+        "filename": file.filename or "sample.exe",
+        "status": "queued",
+        "progress": 0,
+        "created_at": created_at,
+    })
+
     job = AnalysisJob(
         job_id=job_id,
         filename=file.filename or "sample.exe",
         status=JobStatus.QUEUED,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=created_at,
         progress=0,
     )
-    jobs[job_id] = job
 
     # Start analysis in background
     asyncio.create_task(run_analysis_task(job_id, file_path))
@@ -183,32 +195,45 @@ async def submit_analysis(file: UploadFile = File(...)):
 @app.get("/api/job/{job_id}", response_model=AnalysisJob)
 async def get_job_status(job_id: str):
     """Get current status of an analysis job."""
-    if job_id not in jobs:
+    row = await db.get_job(job_id)
+    if not row:
         raise HTTPException(status_code=404, detail="Job not found")
-    return jobs[job_id]
+    return AnalysisJob(
+        job_id=row["job_id"],
+        filename=row["filename"],
+        status=JobStatus(row["status"]),
+        created_at=row["created_at"],
+        completed_at=row.get("completed_at"),
+        progress=row.get("progress", 0),
+        error=row.get("error"),
+    )
 
 
 @app.get("/api/report/{job_id}")
 async def get_report(job_id: str):
     """Get the full analysis report for a completed job."""
-    if job_id not in jobs:
+    row = await db.get_job(job_id)
+    if not row:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    if jobs[job_id].status != JobStatus.COMPLETED:
+    if row["status"] != "completed":
         raise HTTPException(
             status_code=202,
-            detail=f"Analysis not complete. Status: {jobs[job_id].status.value}",
+            detail=f"Analysis not complete. Status: {row['status']}",
         )
 
-    if job_id not in reports:
-        # Try loading from disk
-        report_path = settings.reports_dir / job_id / "report.json"
-        if report_path.exists():
-            with open(report_path) as f:
-                return JSONResponse(content=json.load(f))
-        raise HTTPException(status_code=404, detail="Report not found")
+    # Try SQLite first
+    report_data = await db.get_report(job_id)
+    if report_data:
+        return JSONResponse(content=report_data)
 
-    return JSONResponse(content=json.loads(reports[job_id].model_dump_json()))
+    # Fall back to disk
+    report_path = settings.reports_dir / job_id / "report.json"
+    if report_path.exists():
+        with open(report_path) as f:
+            return JSONResponse(content=json.load(f))
+
+    raise HTTPException(status_code=404, detail="Report not found")
 
 
 @app.get("/api/download/{job_id}/{artifact}")
@@ -217,7 +242,7 @@ async def download_artifact(job_id: str, artifact: str):
     Download a generated artifact.
     artifact: report_json | report_stix | yara | attack_navigator
     """
-    if job_id not in jobs:
+    if not await db.get_job(job_id):
         raise HTTPException(status_code=404, detail="Job not found")
 
     artifact_map = {
@@ -245,8 +270,20 @@ async def download_artifact(job_id: str, artifact: str):
 
 @app.get("/api/jobs")
 async def list_jobs():
-    """List all analysis jobs."""
-    return list(jobs.values())
+    """List all analysis jobs (from SQLite)."""
+    rows = await db.list_jobs(limit=200)
+    return [
+        AnalysisJob(
+            job_id=r["job_id"],
+            filename=r["filename"],
+            status=JobStatus(r["status"]),
+            created_at=r["created_at"],
+            completed_at=r.get("completed_at"),
+            progress=r.get("progress", 0),
+            error=r.get("error"),
+        )
+        for r in rows
+    ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -290,15 +327,18 @@ async def websocket_progress(websocket: WebSocket, job_id: str):
 
 @app.on_event("startup")
 async def startup():
-    logger.info("═" * 60)
-    logger.info("  ViGiL — Multi-Agent Malware Analysis Platform v1.0.0")
-    logger.info("═" * 60)
+    await db.init_db()
+    logger.info("\u2550" * 60)
+    logger.info("  ViGiL — Multi-Agent Malware Analysis Platform v2.0.0")
+    logger.info("\u2550" * 60)
     logger.info(f"  LLM Provider: {settings.llm_provider}")
     logger.info(f"  Threat Intel: {'ENABLED' if settings.threat_intel_enabled else 'DEMO MODE'}")
+    logger.info(f"  CrewAI: {'ENABLED (hierarchical)' if settings.crewai_enabled else 'DISABLED'}")
     logger.info(f"  Vector Store: {settings.vector_store}")
+    logger.info(f"  Job Store: SQLite")
     logger.info(f"  Upload Dir: {settings.upload_dir}")
     logger.info(f"  Reports Dir: {settings.reports_dir}")
-    logger.info("═" * 60)
+    logger.info("\u2550" * 60)
 
 
 if __name__ == "__main__":
