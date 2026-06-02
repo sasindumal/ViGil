@@ -128,13 +128,40 @@ def cmd_train(args):
     from ..model.dataset import CPGDataset
     from ..model.trainer import Trainer
     from ..model.evaluator import Evaluator
-    from ..config import TrainingConfig, ModelConfig
+    from ..config import UIRConfig
     
     data_dir = Path(args.data_dir)
     
     if not data_dir.exists():
         logger.error(f"Data directory not found: {data_dir}")
         return 1
+    
+    # Initialize config (automatically loads from .env)
+    config = UIRConfig()
+    
+    # Resolve Model parameters
+    hidden_dim = args.hidden_dim if args.hidden_dim is not None else config.model.hidden_dim
+    num_layers = args.num_layers if args.num_layers is not None else config.model.num_layers
+    num_heads = args.num_heads if args.num_heads is not None else config.model.num_heads
+    
+    model_config = config.model.model_copy(update={
+        'hidden_dim': hidden_dim,
+        'num_layers': num_layers,
+        'num_heads': num_heads
+    })
+    
+    # Resolve Training parameters
+    epochs = args.epochs if args.epochs is not None else config.training.num_epochs
+    batch_size = args.batch_size if args.batch_size is not None else config.training.batch_size
+    lr = args.lr if args.lr is not None else config.training.learning_rate
+    checkpoint_dir = Path(args.checkpoint_dir) if args.checkpoint_dir is not None else config.training.checkpoint_dir
+    
+    train_config = config.training.model_copy(update={
+        'num_epochs': epochs,
+        'batch_size': batch_size,
+        'learning_rate': lr,
+        'checkpoint_dir': checkpoint_dir
+    })
     
     # Create dataset
     logger.info(f"Loading dataset from: {data_dir}")
@@ -152,30 +179,36 @@ def cmd_train(args):
     num_benign = len(labels) - num_malware
     logger.info(f"Class distribution: {num_benign} benign, {num_malware} malware")
     
-    # Stratified split to maintain class balance
+    # Stratified 3-way split: Train, Val, Test to maintain class balance
     from sklearn.model_selection import train_test_split
     indices = list(range(len(dataset)))
     
-    train_indices, val_indices = train_test_split(
+    # Step 1: Split off the test set
+    train_val_indices, test_indices = train_test_split(
         indices,
-        test_size=0.2,
+        test_size=train_config.test_ratio,
         stratify=labels,
+        random_state=42
+    )
+    
+    # Step 2: Split the remaining into train and validation
+    relative_val_ratio = train_config.val_ratio / (train_config.train_ratio + train_config.val_ratio)
+    train_val_labels = [labels[idx] for idx in train_val_indices]
+    
+    train_indices, val_indices = train_test_split(
+        train_val_indices,
+        test_size=relative_val_ratio,
+        stratify=train_val_labels,
         random_state=42
     )
     
     train_dataset = torch.utils.data.Subset(dataset, train_indices)
     val_dataset = torch.utils.data.Subset(dataset, val_indices)
+    test_dataset = torch.utils.data.Subset(dataset, test_indices)
     
-    logger.info(f"Train: {len(train_indices)}, Val: {len(val_indices)} (stratified)")
+    logger.info(f"Train: {len(train_indices)}, Val: {len(val_indices)}, Test: {len(test_indices)} (stratified)")
     
     # Create model
-    model_config = ModelConfig(
-        hidden_dim=args.hidden_dim,
-        num_layers=args.num_layers,
-        num_heads=args.num_heads,
-        num_classes=2
-    )
-    
     model = HeterogeneousGraphTransformer(
         input_dim=256,
         hidden_dim=model_config.hidden_dim,
@@ -184,27 +217,19 @@ def cmd_train(args):
         num_classes=model_config.num_classes
     )
     
-    # Training config
-    train_config = TrainingConfig(
-        batch_size=args.batch_size,
-        learning_rate=args.lr,
-        num_epochs=args.epochs,
-        checkpoint_dir=Path(args.checkpoint_dir)
-    )
-    
     # Train
     trainer = Trainer(model, train_config)
     history = trainer.train(train_dataset, val_dataset)
     
     logger.info(f"Training complete. Best val accuracy: {trainer.best_val_acc:.4f}")
     
-    # Evaluate
+    # Evaluate on the held-out test set
     if args.test:
         from torch.utils.data import DataLoader
         from ..model.dataset import collate_cpg_batch
         
-        val_loader = DataLoader(val_dataset, batch_size=args.batch_size, collate_fn=collate_cpg_batch)
-        metrics = trainer.evaluate(val_loader)
+        test_loader = DataLoader(test_dataset, batch_size=train_config.batch_size, collate_fn=collate_cpg_batch)
+        metrics = trainer.evaluate(test_loader)
         
         evaluator = Evaluator()
         evaluator.print_report(metrics['predictions'], metrics['labels'])
@@ -287,13 +312,13 @@ def main():
     # Train command
     train_parser = subparsers.add_parser('train', help='Train the model')
     train_parser.add_argument('--data-dir', '-d', required=True, help='CPG data directory')
-    train_parser.add_argument('--epochs', type=int, default=100)
-    train_parser.add_argument('--batch-size', type=int, default=32)
-    train_parser.add_argument('--lr', type=float, default=1e-4)
-    train_parser.add_argument('--hidden-dim', type=int, default=256)
-    train_parser.add_argument('--num-layers', type=int, default=4)
-    train_parser.add_argument('--num-heads', type=int, default=8)
-    train_parser.add_argument('--checkpoint-dir', default='./checkpoints')
+    train_parser.add_argument('--epochs', type=int, default=None)
+    train_parser.add_argument('--batch-size', type=int, default=None)
+    train_parser.add_argument('--lr', type=float, default=None)
+    train_parser.add_argument('--hidden-dim', type=int, default=None)
+    train_parser.add_argument('--num-layers', type=int, default=None)
+    train_parser.add_argument('--num-heads', type=int, default=None)
+    train_parser.add_argument('--checkpoint-dir', default=None)
     train_parser.add_argument('--test', action='store_true', help='Run evaluation')
     
     # Predict command

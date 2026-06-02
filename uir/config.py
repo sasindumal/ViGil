@@ -8,6 +8,39 @@ from pathlib import Path
 from typing import Optional, List
 from pydantic import BaseModel, Field
 from enum import Enum
+import os
+
+def load_dotenv(dotenv_path=".env"):
+    path = Path(dotenv_path)
+    if path.exists():
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if '=' in line:
+                    key, val = line.split('=', 1)
+                    key = key.strip()
+                    val = val.strip().strip("'\"")
+                    os.environ[key] = val
+
+# Load .env file at import time
+load_dotenv()
+
+def get_env_int(key, default):
+    val = os.getenv(key)
+    return int(val) if val is not None else default
+
+def get_env_float(key, default):
+    val = os.getenv(key)
+    return float(val) if val is not None else default
+
+def get_env_bool(key, default):
+    val = os.getenv(key)
+    if val is not None:
+        return val.lower() in ('true', '1', 'yes')
+    return default
+
 
 
 class FileCategory(str, Enum):
@@ -242,22 +275,27 @@ class TokenizationConfig(BaseModel):
 
 class ModelConfig(BaseModel):
     """Configuration for the HGT model."""
-    hidden_dim: int = Field(default=256, ge=64)
-    num_heads: int = Field(default=8, ge=1)
-    num_layers: int = Field(default=4, ge=1)
-    dropout: float = Field(default=0.1, ge=0.0, le=0.5)
-    num_classes: int = Field(default=2, ge=2)  # malware vs benign
+    hidden_dim: int = Field(default_factory=lambda: get_env_int("HIDDEN_DIM", 256))
+    num_heads: int = Field(default_factory=lambda: get_env_int("NUM_HEADS", 8))
+    num_layers: int = Field(default_factory=lambda: get_env_int("NUM_LAYERS", 4))
+    dropout: float = Field(default_factory=lambda: get_env_float("DROPOUT", 0.1))
+    num_classes: int = Field(default_factory=lambda: get_env_int("NUM_CLASSES", 2))
 
 
 class TrainingConfig(BaseModel):
     """Configuration for model training."""
-    batch_size: int = Field(default=32, ge=1)
-    learning_rate: float = Field(default=1e-4, gt=0)
-    num_epochs: int = Field(default=100, ge=1)
-    early_stopping_patience: int = Field(default=10, ge=1)
-    use_contrastive_loss: bool = True
-    contrastive_temperature: float = Field(default=0.07, gt=0)
-    checkpoint_dir: Path = Path("./checkpoints")
+    batch_size: int = Field(default_factory=lambda: get_env_int("BATCH_SIZE", 32))
+    learning_rate: float = Field(default_factory=lambda: get_env_float("LEARNING_RATE", 1e-4))
+    num_epochs: int = Field(default_factory=lambda: get_env_int("NUM_EPOCHS", 100))
+    early_stopping_patience: int = Field(default_factory=lambda: get_env_int("EARLY_STOPPING_PATIENCE", 10))
+    use_contrastive_loss: bool = Field(default_factory=lambda: get_env_bool("USE_CONTRASTIVE_LOSS", True))
+    contrastive_temperature: float = Field(default_factory=lambda: get_env_float("CONTRASTIVE_TEMPERATURE", 0.07))
+    checkpoint_dir: Path = Field(default_factory=lambda: Path(os.getenv("CHECKPOINT_DIR", "./checkpoints")))
+    
+    # Train, validation, test split ratios
+    train_ratio: float = Field(default_factory=lambda: get_env_float("TRAIN_RATIO", 0.8))
+    val_ratio: float = Field(default_factory=lambda: get_env_float("VAL_RATIO", 0.1))
+    test_ratio: float = Field(default_factory=lambda: get_env_float("TEST_RATIO", 0.1))
 
 
 class UIRConfig(BaseModel):
