@@ -14,12 +14,33 @@ import logging
 from ..cpg.graph import CodePropertyGraph
 from ..cpg.schema import NodeType, EdgeType
 
+import hashlib
+
 logger = logging.getLogger(__name__)
 
 
 # Mappings for node/edge types to indices
 NODE_TYPE_MAP = {nt: i for i, nt in enumerate(NodeType)}
 EDGE_TYPE_MAP = {et: i for i, et in enumerate(EdgeType)}
+
+ALL_INST_KEYS = [
+    # NodeTypes
+    'CALL', 'RETURN', 'CONTROL_STRUCTURE', 'OPERATOR', 'LITERAL', 'IDENTIFIER',
+    # OperatorTypes
+    '<operator>.addition', '<operator>.subtraction', '<operator>.multiplication',
+    '<operator>.division', '<operator>.modulo', '<operator>.negation',
+    '<operator>.bitAnd', '<operator>.bitOr', '<operator>.bitXor', '<operator>.bitNot',
+    '<operator>.leftShift', '<operator>.rightShift', '<operator>.equals',
+    '<operator>.notEquals', '<operator>.lessThan', '<operator>.lessEqual',
+    '<operator>.greaterThan', '<operator>.greaterEqual', '<operator>.logicalAnd',
+    '<operator>.logicalOr', '<operator>.logicalNot', '<operator>.assignment',
+    '<operator>.load', '<operator>.store', '<operator>.addressOf',
+    '<operator>.dereference', '<operator>.indexAccess', '<operator>.memberAccess',
+    '<operator>.cast',
+    # ControlTypes
+    'IF', 'ELSE', 'WHILE', 'FOR', 'DO', 'SWITCH', 'TRY', 'CATCH', 'FINALLY'
+]
+INST_KEY_TO_IDX = {key: 100 + i for i, key in enumerate(ALL_INST_KEYS)}
 
 
 class CPGData:
@@ -143,6 +164,29 @@ class CPGDataset(Dataset):
                     elif edge.target_id in node_to_block and edge.source_id not in node_to_block:
                         node_to_block[edge.source_id] = node_to_block[edge.target_id]
             
+            # Reconstruct instruction counts for BLOCK nodes from original instruction-level nodes
+            block_inst_counts = {}
+            for node in cpg.nodes.values():
+                if node.node_type not in (NodeType.BLOCK, NodeType.METHOD):
+                    parent_block = node_to_block.get(node.id)
+                    if parent_block is not None:
+                        if parent_block not in block_inst_counts:
+                            block_inst_counts[parent_block] = {}
+                        
+                        # Determine key: NodeType value or operator_type/control_type value
+                        key = node.node_type.value
+                        if node.operator_type:
+                            key = node.operator_type.value
+                        elif node.control_type:
+                            key = node.control_type.value
+                            
+                        block_inst_counts[parent_block][key] = block_inst_counts[parent_block].get(key, 0) + 1
+            
+            # Inject inst_counts into BLOCK node attributes
+            for n in bb_nodes:
+                if n.node_type == NodeType.BLOCK:
+                    n.attributes['inst_counts'] = block_inst_counts.get(n.id, {})
+            
             # Reconstruct edges at basic block level
             new_edges = []
             seen_edges = set()
@@ -261,7 +305,7 @@ class CPGDataset(Dataset):
         return data
     
     def _node_to_features(self, node) -> torch.Tensor:
-        """Convert node to feature vector."""
+        """Convert node to feature vector with deterministic hashing and semantic composition."""
         feat = torch.zeros(self.embedding_dim)
         
         # Encode node type
@@ -275,10 +319,20 @@ class CPGDataset(Dataset):
         if node.line_number > 0:
             feat[21] = min(node.line_number / 1000, 1.0)
         
-        # Hash the name for simple encoding
+        # Deterministic hashing of the name
         if node.name:
-            name_hash = hash(node.name) % 100
+            name_bytes = node.name.encode('utf-8', errors='ignore')
+            name_hash = int(hashlib.md5(name_bytes).hexdigest(), 16) % 50
             feat[50 + name_hash] = 1.0
+            
+        # Populate instruction composition features for BLOCK nodes
+        if node.node_type == NodeType.BLOCK:
+            inst_counts = node.attributes.get('inst_counts', {})
+            for k, count in inst_counts.items():
+                if k in INST_KEY_TO_IDX:
+                    idx = INST_KEY_TO_IDX[k]
+                    # Normalize frequency count
+                    feat[idx] = min(count / 10.0, 1.0)
         
         return feat
     

@@ -88,6 +88,12 @@ class CPGBuilder:
             # Concatenate all instructions' raw texts as the block code
             block_code = "\n".join([inst.raw_text for inst in block.instructions if inst.raw_text])
             
+            # Count instruction types in this block
+            inst_counts = {}
+            for inst in block.instructions:
+                itype = inst.inst_type.value
+                inst_counts[itype] = inst_counts.get(itype, 0) + 1
+            
             block_node = cpg.create_node(
                 NodeType.BLOCK,
                 name=f"block_{block.block_id}",
@@ -96,7 +102,8 @@ class CPGBuilder:
                 attributes={
                     'start': block.start_address,
                     'end': block.end_address,
-                    'num_instructions': len(block.instructions)
+                    'num_instructions': len(block.instructions),
+                    'inst_counts': inst_counts
                 }
             )
             block_nodes[(func.name, block.block_id)] = block_node.id
