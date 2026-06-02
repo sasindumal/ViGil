@@ -32,7 +32,7 @@ class RunLogger:
             json.dump(self.steps, f, indent=2)
 
     def log_agent_step(self, agent_name: str, step_output: Any):
-        """Called by CrewAI step_callback to capture live thoughts."""
+        """Called by CrewAI step_callback or task_callback to capture live thoughts/outputs."""
         timestamp = datetime.utcnow().isoformat()
         
         step_data = {
@@ -42,17 +42,19 @@ class RunLogger:
             "content": ""
         }
         
-        # Extract fields from CrewAI AgentAction / AgentFinish or string representations
-        if hasattr(step_output, "thought"):
+        # Extract fields from CrewAI AgentAction / AgentFinish or TaskOutput or string representations
+        if hasattr(step_output, "raw"):
+            step_data["content"] = getattr(step_output, "raw")
+        elif hasattr(step_output, "thought"):
             step_data["thought"] = getattr(step_output, "thought")
-        if hasattr(step_output, "tool"):
-            step_data["tool"] = getattr(step_output, "tool")
-        if hasattr(step_output, "tool_input"):
-            step_data["tool_input"] = getattr(step_output, "tool_input")
-        if hasattr(step_output, "result"):
-            step_data["tool_result"] = getattr(step_output, "result")
-        if hasattr(step_output, "output"):
-            step_data["content"] = getattr(step_output, "output")
+            if hasattr(step_output, "tool"):
+                step_data["tool"] = getattr(step_output, "tool")
+            if hasattr(step_output, "tool_input"):
+                step_data["tool_input"] = getattr(step_output, "tool_input")
+            if hasattr(step_output, "result"):
+                step_data["tool_result"] = getattr(step_output, "result")
+            if hasattr(step_output, "output"):
+                step_data["content"] = getattr(step_output, "output")
         else:
             step_data["content"] = str(step_output)
             
@@ -131,6 +133,28 @@ class AgenticMalwareAnalyzer:
                     "output": output
                 })
         return callback
+
+    def _on_task_completed(self, task_output):
+        """Called by CrewAI when any task in the sequential crew completes."""
+        agent_role = "Unknown Specialist"
+        if hasattr(task_output, "agent") and task_output.agent:
+            agent_role = getattr(task_output.agent, "role", str(task_output.agent))
+            
+        # Get raw output
+        output_str = getattr(task_output, "raw", "") or str(task_output)
+        
+        # Log to local run files
+        self.run_logger.log_agent_step(agent_role, task_output)
+        
+        # Stream via WebSocket as an agent step with final output populated
+        if self.web_callback:
+            self.web_callback("agent_step", {
+                "agent": agent_role,
+                "thought": "",
+                "tool": "",
+                "tool_input": "",
+                "output": output_str
+            })
 
     def analyze(self, chunks: Dict[str, Any]) -> str:
         """Executes CrewAI collaborative reasoning over chunked CPGs."""
@@ -331,76 +355,148 @@ class AgenticMalwareAnalyzer:
 
         # ----------------- Define Tasks -----------------
         
-        # Step 1: Broad specialist inspection
-        task_specialists = Task(
-            description=f"""
-            Examine the CPG structure, imports, and strings:
-            
-            IMPORTS METADATA:
-            {metadata_str}
-            
-            STRINGS METADATA:
-            {strings_str}
-            
-            CALLS & METHODS:
-            {call_graph_str}
-            
-            SUBGRAPHS SAMPLES:
-            {subgraphs_str}
-            
-            Specialists must identify threats matching their roles:
-            - Graph Pattern Specialist: malicious motifs (OpenProcess -> VirtualAllocEx -> WriteProcessMemory -> CreateRemoteThread)
-            - Data Flow Specialist: taint tracking, decrypt loops
-            - Memory Specialist: suspicious memory APIs (WriteProcessMemory, VirtualAlloc, etc.)
-            - Anti-Analysis Specialist: sandbox/VM/debugger triggers (IsDebuggerPresent, CPUID, VBox)
-            - Cryptography Specialist: crypto routines, XOR loops, ransomware behavior
-            - Persistence Specialist: Run Keys, Scheduled Tasks, DLL Search Order Hijacking
-            - Privilege Escalation Specialist: UAC bypass, debug privileges
-            - Network Specialist: sockets, exfiltration, DNS C2 beacons
-            - Exploitation Specialist: stack pivots, shellcode, ROP chains
-            - Obfuscation Specialist: flattening, indirect calls, UPX/Themida packing indicators
-            - Behavioral Specialist: sequence abstractions (Credential Theft, etc.)
-            - Embedded Specialist: PE resources, certificates, nested binaries
-            
-            Synthesize your findings inside a draft report.
-            """,
-            expected_output="A structured draft report aggregating findings from all analysis specialists.",
-            agents=[agent_graph, agent_df, agent_mem, agent_anti, agent_crypto, agent_persist, agent_priv, agent_net, agent_exploit, agent_obfusc, agent_cap, agent_embed],
+        cpg_context_str = f"""
+        IMPORTS METADATA:
+        {metadata_str}
+        
+        STRINGS METADATA:
+        {strings_str}
+        
+        CALLS & METHODS:
+        {call_graph_str}
+        
+        SUBGRAPHS SAMPLES:
+        {subgraphs_str}
+        """
+
+        # 1. Graph Pattern Task
+        task_graph = Task(
+            description=f"Examine call graph structure, imports, and strings, and identify known malicious graph motifs and sequence calls (e.g. OpenProcess -> VirtualAllocEx -> WriteProcessMemory -> CreateRemoteThread).\n\nCPG DATA:\n{cpg_context_str}",
+            expected_output="Detailed graph pattern motifs found matching process injection or downloaders.",
+            agent=agent_graph,
             llm=self.llm
         )
 
-        # Step 2: MITRE mapping & Malware similarity classification
-        task_intel = Task(
-            description="""
-            Review the drafted reports. Apply advanced context mapping:
-            - ATT&CK Mapping Specialist: Map verified behaviors to MITRE tactics (e.g. T1055, T1027) with individual confidence scores.
-            - Malware Similarity Specialist: Evaluate similarity ratios to Lumma, Emotet, Qakbot, RedLine, and DarkGate.
-            
-            Incorporate these mappings and indicators directly into the draft report.
-            """,
-            expected_output="An expanded draft report with MITRE ATT&CK techniques mapped and malware family similarity ratios configured.",
-            agents=[agent_mitre, agent_sim],
+        # 2. Data Flow Task
+        task_df = Task(
+            description=f"Trace sensitive variable propagation, network-to-buffer decrypt logic, or registry-to-shellcode execution routes in the method subgraphs.\n\nCPG DATA:\n{cpg_context_str}",
+            expected_output="Detailed data flow taint paths found.",
+            agent=agent_df,
             llm=self.llm
         )
 
-        # Step 3: Strict verification to prevent hallucinations
+        # 3. Memory Manipulation Task
+        task_mem = Task(
+            description=f"Scan strictly for virtual memory manipulation APIs and indicators of process hollowing, reflective DLL loading, or APC injection.\n\nCPG DATA:\n{cpg_context_str}",
+            expected_output="Highlights of virtual memory allocations and injection vectors.",
+            agent=agent_mem,
+            llm=self.llm
+        )
+
+        # 4. Anti-Analysis Task
+        task_anti = Task(
+            description=f"Scrutinize debugger evasion APIs, VM artifacts (CPUID, VMWare, VirtualBox), VBox indicators, and automated sandbox guest checks.\n\nCPG DATA:\n{cpg_context_str}",
+            expected_output="Detailed anti-debugging, anti-VM, and anti-sandbox traits.",
+            agent=agent_anti,
+            llm=self.llm
+        )
+
+        # 5. Cryptography Task
+        task_crypto = Task(
+            description=f"Search for cryptographic library imports (AES, RC4, ChaCha20), classic XOR decryption loops, or custom ransomware file-traversal schemes.\n\nCPG DATA:\n{cpg_context_str}",
+            expected_output="Identified string decryption routines or payload encryption ciphers.",
+            agent=agent_crypto,
+            llm=self.llm
+        )
+
+        # 6. Persistence Task
+        task_persist = Task(
+            description=f"Analyze persistent installation hooks including Run Keys, Scheduled Tasks, Windows Services, WMI hooks, COM hijacking, or DLL search order hijacking.\n\nCPG DATA:\n{cpg_context_str}",
+            expected_output="Mapped boot-level persistence methods.",
+            agent=agent_persist,
+            llm=self.llm
+        )
+
+        # 7. Privilege Escalation Task
+        task_priv = Task(
+            description=f"Analyze credential token manipulation, SeDebugPrivilege token requests, driver loading (BYOVD), or UAC bypass flows.\n\nCPG DATA:\n{cpg_context_str}",
+            expected_output="Discovered privilege escalation techniques.",
+            agent=agent_priv,
+            llm=self.llm
+        )
+
+        # 8. Network Behavior Task
+        task_net = Task(
+            description=f"Analyze socket imports, WinINet/WinHTTP traffic endpoints, C2 beaconing strings, and data exfiltration patterns.\n\nCPG DATA:\n{cpg_context_str}",
+            expected_output="Identified socket setups, downloader URLs, and HTTP C2 channels.",
+            agent=agent_net,
+            llm=self.llm
+        )
+
+        # 9. Exploitation Task
+        task_exploit = Task(
+            description=f"Analyze ROP chains, stack pivots, shellcode, and exploit primitives in instruction subgraphs.\n\nCPG DATA:\n{cpg_context_str}",
+            expected_output="Discovered exploitation behaviors.",
+            agent=agent_exploit,
+            llm=self.llm
+        )
+
+        # 10. Obfuscation & Packing Task
+        task_obfusc = Task(
+            description=f"Examine control flow flattening, opaque predicates, indirect call graphs, and packers (UPX, Themida, VMProtect).\n\nCPG DATA:\n{cpg_context_str}",
+            expected_output="Detailed unpacking and de-obfuscation assessment.",
+            agent=agent_obfusc,
+            llm=self.llm
+        )
+
+        # 11. Behavioral Capability Task
+        task_cap = Task(
+            description=f"Infer dynamic sequential capabilities (e.g. Credential Theft) by mapping the program flow actions instead of raw API listings.\n\nCPG DATA:\n{cpg_context_str}",
+            expected_output="Logical capabilities map.",
+            agent=agent_cap,
+            llm=self.llm
+        )
+
+        # 12. Embedded Artifact Task
+        task_embed = Task(
+            description=f"Dissect nested PE binaries, resource blocks, embedded certificates, and version metadata info.\n\nCPG DATA:\n{cpg_context_str}",
+            expected_output="Embedded resources summary.",
+            agent=agent_embed,
+            llm=self.llm
+        )
+
+        # 13. MITRE Mapping Task
+        task_mitre = Task(
+            description=f"Review the specialists findings and map all identified behaviors to standard MITRE ATT&CK technique IDs with individual confidence scores.\n\nCPG DATA:\n{cpg_context_str}",
+            expected_output="MITRE ATT&CK technique mapping summary.",
+            agent=agent_mitre,
+            context=[task_graph, task_df, task_mem, task_anti, task_crypto, task_persist, task_priv, task_net, task_exploit, task_obfusc, task_cap, task_embed],
+            llm=self.llm
+        )
+
+        # 14. Similarity Task
+        task_sim = Task(
+            description=f"Review the specialists findings and compute similarity metrics against known malware family signatures (Lumma, Emotet, Qakbot, RedLine, DarkGate).\n\nCPG DATA:\n{cpg_context_str}",
+            expected_output="Malware family similarity percentages.",
+            agent=agent_sim,
+            context=[task_graph, task_df, task_mem, task_anti, task_crypto, task_persist, task_priv, task_net, task_exploit, task_obfusc, task_cap, task_embed],
+            llm=self.llm
+        )
+
+        # 15. Audit and Verification Task
         task_verify = Task(
-            description="""
-            Audit the expanded draft report.
-            LLM Evidence Verification Specialist: Check every single claim made by the specialists.
-            Verify that any API call, sequence, or structural pattern correlates directly to actual structures (e.g., specific library calls or node definitions) present in the call graph chunk, metadata chunk, or subgraphs data.
-            Generate a JSON-verifiable trace table mapping claims to node names/imports and mark them as verified. Remove or modify any claim that cannot be validated.
-            """,
-            expected_output="An audited findings draft containing a JSON trace table mapping each behavior claim to verified node targets.",
+            description=f"Audit every single claim made by the previous specialists. Cross-check each API call, sequence, and string behavior against literal imports, string logs, and CPG node definitions in the raw data. Remove or modify any claim that cannot be validated. Generate a verified claims trace table mapping claims to CPG Node IDs.\n\nCPG DATA:\n{cpg_context_str}",
+            expected_output="An audited findings trace table mapping each behavior claim to verified node targets.",
             agent=agent_verifier,
+            context=[task_graph, task_df, task_mem, task_anti, task_crypto, task_persist, task_priv, task_net, task_exploit, task_obfusc, task_cap, task_embed, task_mitre, task_sim],
             llm=self.llm
         )
 
-        # Step 4: Executive synthesis
+        # 16. Synthesis and Reporting Task
         task_synthesis = Task(
-            description="""
+            description=f"""
             Synthesize all validated details into a premium technical brief.
-            Lead Malware Analyst: Compose the final malware report in standard Markdown formatting.
+            Compose the final report in standard Markdown formatting.
             The report must explicitly provide:
             1. **VERDICT**: [MALWARE or BENIGN] with absolute confidence metrics.
             2. **THREAT SCORE**: A rating from 0 (Benign) to 10 (Critical Threat).
@@ -409,10 +505,32 @@ class AgenticMalwareAnalyzer:
             5. **MITRE ATT&CK MATRIX**: Standard technique grid.
             6. **MALWARE SIMILARITY SCORE**: Matching percentages.
             
-            Keep the styling clean and authoritative. Do not make claims that were not verified.
+            IMPORTANT: For EVIDENCES, MITRE ATT&CK MATRIX, and MALWARE SIMILARITY SCORE, you MUST present the data as standard markdown tables with the following headers:
+            - Evidence Table:
+            | Claim | CPG Node ID / API / String | Status |
+            | --- | --- | --- |
+            | [Claim] | [Node/API/String] | Verified |
+            
+            - MITRE Table:
+            | Technique ID | Technique Name | Confidence |
+            | --- | --- | --- |
+            | [ID like T1055] | [Name] | [Confidence like 90%] |
+            
+            - Similarity Table:
+            | Family | Similarity Percentage |
+            | --- | --- |
+            | [Malware Family Name] | [Percentage like 85%] |
+            
+            Keep the styling clean and authoritative. Do not make claims that were not verified by the auditor.
+            \n\nCPG DATA:\n{cpg_context_str}
             """,
             expected_output="The final executive markdown malware analysis report.",
             agent=agent_lead,
+            context=[
+                task_graph, task_df, task_mem, task_anti, task_crypto, 
+                task_persist, task_priv, task_net, task_exploit, task_obfusc, 
+                task_cap, task_embed, task_mitre, task_sim, task_verify
+            ],
             llm=self.llm
         )
 
@@ -423,8 +541,13 @@ class AgenticMalwareAnalyzer:
                 agent_persist, agent_priv, agent_net, agent_mitre, agent_sim, 
                 agent_exploit, agent_obfusc, agent_cap, agent_embed, agent_verifier, agent_lead
             ],
-            tasks=[task_specialists, task_intel, task_verify, task_synthesis],
-            verbose=True
+            tasks=[
+                task_graph, task_df, task_mem, task_anti, task_crypto, 
+                task_persist, task_priv, task_net, task_exploit, task_obfusc, 
+                task_cap, task_embed, task_mitre, task_sim, task_verify, task_synthesis
+            ],
+            verbose=True,
+            task_callback=self._on_task_completed
         )
 
         # Execute

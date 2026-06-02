@@ -31,33 +31,29 @@ class Config:
     @classmethod
     def get_llm(cls):
         """Returns the configured LLM based on provider selection."""
-        # We dynamic import to avoid requiring crewai / langchain when not active
+        from crewai import LLM
+        
         if cls.LLM_PROVIDER == "openai":
-            from langchain_openai import ChatOpenAI
-            if not cls.OPENAI_API_KEY:
+            if not cls.OPENAI_API_KEY or cls.OPENAI_API_KEY == "your-api-key-here":
                 raise ValueError("OPENAI_API_KEY must be set in .env when using openai provider.")
-            return ChatOpenAI(
-                api_key=cls.OPENAI_API_KEY,
+            return LLM(
                 model=cls.OPENAI_MODEL_NAME,
+                api_key=cls.OPENAI_API_KEY,
                 temperature=0.1
             )
         elif cls.LLM_PROVIDER == "ollama":
-            from langchain_openai import ChatOpenAI
-            # Ollama operates as an OpenAI compatible endpoint or via ChatOllama
-            # Let's use OpenAI compatible client for Ollama to stay robust with CrewAI
-            return ChatOpenAI(
-                base_url=f"{cls.OLLAMA_API_BASE}/v1",
-                api_key="ollama", # placeholder
-                model=cls.OLLAMA_MODEL_NAME,
+            return LLM(
+                model=f"ollama/{cls.OLLAMA_MODEL_NAME}",
+                base_url=cls.OLLAMA_API_BASE,
                 temperature=0.1
             )
         elif cls.LLM_PROVIDER == "lmstudio":
-            from langchain_openai import ChatOpenAI
-            return ChatOpenAI(
+            return LLM(
+                model=f"openai/{cls.LMSTUDIO_MODEL_NAME}",
                 base_url=cls.LMSTUDIO_API_BASE,
-                api_key="lmstudio", # placeholder
-                model=cls.LMSTUDIO_MODEL_NAME,
+                api_key="lmstudio",
                 temperature=0.1
             )
         else:
             raise ValueError(f"Unknown LLM_PROVIDER: {cls.LLM_PROVIDER}")
+

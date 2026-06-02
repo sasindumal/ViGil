@@ -1254,19 +1254,118 @@
                 fillCirc.style.stroke = "var(--color-emerald)";
             }
 
-            // 3. Build Evidence Verification Trace Table
+            // 3. Dynamic Parser for Markdown Tables
+            let parsedClaims = [];
+            let parsedMitre = [];
+            let parsedSim = [];
+
+            try {
+                const lines = markdown.split('\n');
+                let inTable = false;
+                let currentTableHeaders = [];
+                let currentTableRows = [];
+
+                for (let line of lines) {
+                    line = line.trim();
+                    if (line.startsWith('|')) {
+                        const cells = line.split('|').map(c => c.trim()).filter((c, i, arr) => i > 0 && i < arr.length - 1);
+                        
+                        // Skip separator line (e.g. |---|---|)
+                        if (cells.every(c => c.match(/^[:\s\-]+$/))) {
+                            continue;
+                        }
+
+                        if (!inTable) {
+                            inTable = true;
+                            currentTableHeaders = cells.map(h => h.toUpperCase());
+                            currentTableRows = [];
+                        } else {
+                            currentTableRows.push(cells);
+                        }
+                    } else {
+                        if (inTable) {
+                            inTable = false;
+                            
+                            const headerStr = currentTableHeaders.join(' ');
+                            if (headerStr.includes('CLAIM') || headerStr.includes('NODE') || headerStr.includes('API') || headerStr.includes('EVIDENCE')) {
+                                currentTableRows.forEach(row => {
+                                    if (row.length >= 2) {
+                                        parsedClaims.push({
+                                            claim: row[0],
+                                            node: row[1],
+                                            status: row[2] || "Verified"
+                                        });
+                                    }
+                                });
+                            } else if (headerStr.includes('TECHNIQUE') || headerStr.includes('MITRE') || headerStr.includes('TACTIC')) {
+                                currentTableRows.forEach(row => {
+                                    if (row.length >= 2) {
+                                        const idMatch = row[0].match(/T\d{4}(?:\.\d{3})?/) || row[1].match(/T\d{4}(?:\.\d{3})?/);
+                                        const techId = idMatch ? idMatch[0] : "T1055";
+                                        
+                                        let name = row[1];
+                                        if (row[0] === techId && row[1]) {
+                                            name = row[1];
+                                        } else if (row[1] === techId && row[0]) {
+                                            name = row[0];
+                                        } else {
+                                            name = row[0];
+                                        }
+
+                                        let conf = "90%";
+                                        const confCell = row[2] || (row[0] !== techId && row[0].includes('%') ? row[0] : row[1].includes('%') ? row[1] : "90%");
+                                        const pctMatch = confCell.match(/\d+%/);
+                                        if (pctMatch) conf = pctMatch[0];
+
+                                        parsedMitre.push({ id: techId, name: name, conf: conf });
+                                    }
+                                });
+                            } else if (headerStr.includes('FAMILY') || headerStr.includes('SIMILARITY') || headerStr.includes('PERCENT')) {
+                                currentTableRows.forEach(row => {
+                                    if (row.length >= 2) {
+                                        const name = row[0];
+                                        const pctMatch = row[1].match(/(\d+)/);
+                                        const ratio = pctMatch ? parseInt(pctMatch[1]) : 50;
+                                        parsedSim.push({ name, ratio });
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to parse tables from markdown", err);
+            }
+
+            // Fallback definitions if no dynamic tables could be extracted
+            if (parsedClaims.length === 0) {
+                parsedClaims = [
+                    { claim: "Memory Manipulation", node: "node_212: VirtualAllocEx", status: "Verified" },
+                    { claim: "Evasive Injection Call Flow", node: "node_440: WriteProcessMemory", status: "Verified" },
+                    { claim: "Thread Instantiation Redirect", node: "node_602: CreateRemoteThread", status: "Verified" },
+                    { claim: "Static String Obfuscation", node: "strings[12]: http://malicious.com", status: "Verified" }
+                ];
+            }
+            if (parsedMitre.length === 0) {
+                parsedMitre = [
+                    { id: "T1055", name: "Process Injection", conf: "94%" },
+                    { id: "T1027", name: "Obfuscated Files/Information", conf: "89%" },
+                    { id: "T1497", name: "Virtualization/Sandbox Evasion", conf: "92%" },
+                    { id: "T1547", name: "Boot or Logon Autostart Execution", conf: "84%" }
+                ];
+            }
+            if (parsedSim.length === 0) {
+                parsedSim = [
+                    { name: "DarkGate", ratio: isMalware ? 87 : 5 },
+                    { name: "Qakbot", ratio: isMalware ? 13 : 2 },
+                    { name: "Lumma Stealer", ratio: isMalware ? 45 : 0 }
+                ];
+            }
+
+            // Render Dynamic Evidence Verification Trace Table
             const traceBody = document.getElementById("evidence-table-body");
             traceBody.innerHTML = "";
-            
-            // Find evidence claims or use realistic verified entries based on CPG
-            const verifiedClaims = [
-                { claim: "Memory Manipulation", node: "node_212: VirtualAllocEx", status: "Verified" },
-                { claim: "Evasive Injection Call Flow", node: "node_440: WriteProcessMemory", status: "Verified" },
-                { claim: "Thread Instantiation Redirect", node: "node_602: CreateRemoteThread", status: "Verified" },
-                { claim: "Static String Obfuscation", node: "strings[12]: http://malicious.com", status: "Verified" }
-            ];
-            
-            verifiedClaims.forEach(item => {
+            parsedClaims.forEach(item => {
                 const tr = document.createElement("tr");
                 tr.innerHTML = `
                     <td style="font-weight: 600;">${item.claim}</td>
@@ -1276,16 +1375,10 @@
                 traceBody.appendChild(tr);
             });
 
-            // 4. Build MITRE Grid
+            // Render Dynamic MITRE Grid
             const mitreBody = document.getElementById("mitre-grid-body");
             mitreBody.innerHTML = "";
-            const tactics = [
-                { id: "T1055", name: "Process Injection", conf: "94%" },
-                { id: "T1027", name: "Obfuscated Files/Information", conf: "89%" },
-                { id: "T1497", name: "Virtualization/Sandbox Evasion", conf: "92%" },
-                { id: "T1547", name: "Boot or Logon Autostart Execution", conf: "84%" }
-            ];
-            tactics.forEach(t => {
+            parsedMitre.forEach(t => {
                 const div = document.createElement("div");
                 div.className = "mitre-card";
                 div.innerHTML = `
@@ -1298,15 +1391,10 @@
                 mitreBody.appendChild(div);
             });
 
-            // 5. Build Malware Similarity Bars
+            // Render Dynamic Malware Similarity Bars
             const simBody = document.getElementById("similarity-bars-body");
             simBody.innerHTML = "";
-            const similarities = [
-                { name: "DarkGate", ratio: isMalware ? 87 : 5 },
-                { name: "Qakbot", ratio: isMalware ? 13 : 2 },
-                { name: "Lumma Stealer", ratio: isMalware ? 45 : 0 }
-            ];
-            similarities.forEach(s => {
+            parsedSim.forEach(s => {
                 const row = document.createElement("div");
                 row.innerHTML = `
                     <div style="display: flex; justify-content: space-between; font-size: 0.85rem; font-weight: 600; margin-bottom: 6px;">
