@@ -45,7 +45,7 @@ uir batch --input-dir ./malware_dataset --stats
 uir batch --input-dir ./malware_dataset --output-dir ./cpgs
 
 uir batch --input-dir ./malware_dataset --output-dir ./cpgs_default --device-profile cpu_default
-uir batch --input-dir ./malware_dataset --output-dir ./cpgs_m4 --device-profile m4
+python -m uir.pipeline.cli batch --input-dir ./malware_dataset --output-dir ./cpgs --device-profile m4
 uir batch --input-dir ./malware_dataset --output-dir ./cpgs_gtx --device-profile gtx_1650_ti
 
 # Install optimized deps

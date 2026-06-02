@@ -110,59 +110,154 @@ class CPGDataset(Dataset):
             return self._empty_data()
     
     def _cpg_to_data(self, cpg: CodePropertyGraph) -> CPGData:
-        """Convert CPG to tensor data."""
+        """Convert CPG to tensor data, reducing to basic-block nodes and pruning edges on the fly if needed."""
         data = CPGData()
         
-        nodes = list(cpg.nodes.values())
+        # Check if loaded graph contains instruction-level nodes
+        has_instruction_nodes = any(
+            n.node_type not in (NodeType.BLOCK, NodeType.METHOD)
+            for n in cpg.nodes.values()
+        )
+        
+        if has_instruction_nodes:
+            # On-the-fly conversion of instruction-level CPG to Basic-block only CPG
+            bb_nodes = [n for n in cpg.nodes.values() if n.node_type in (NodeType.BLOCK, NodeType.METHOD)]
+            
+            # Map every node to its parent BLOCK node ID
+            node_to_block = {}
+            for n in bb_nodes:
+                if n.node_type == NodeType.BLOCK:
+                    node_to_block[n.id] = n.id
+                    
+            # Propagate BLOCK containment via AST edges
+            for edge in cpg.edges:
+                if edge.edge_type == EdgeType.AST:
+                    if edge.source_id in node_to_block:
+                        node_to_block[edge.target_id] = node_to_block[edge.source_id]
+                        
+            # Bounded propagation for nested/argument nodes (operands, literals, identifiers, etc.)
+            for _ in range(3):
+                for edge in cpg.edges:
+                    if edge.source_id in node_to_block and edge.target_id not in node_to_block:
+                        node_to_block[edge.target_id] = node_to_block[edge.source_id]
+                    elif edge.target_id in node_to_block and edge.source_id not in node_to_block:
+                        node_to_block[edge.source_id] = node_to_block[edge.target_id]
+            
+            # Reconstruct edges at basic block level
+            new_edges = []
+            seen_edges = set()
+            
+            for edge in cpg.edges:
+                src_id, tgt_id = edge.source_id, edge.target_id
+                etype = edge.edge_type
+                
+                # 1. CFG edges: keep only block-to-block CFG edges
+                if etype == EdgeType.CFG:
+                    src_block = node_to_block.get(src_id)
+                    tgt_block = node_to_block.get(tgt_id)
+                    if src_block is not None and tgt_block is not None and src_block != tgt_block:
+                        edge_key = (src_block, tgt_block, EdgeType.CFG.value)
+                        if edge_key not in seen_edges:
+                            seen_edges.add(edge_key)
+                            new_edges.append((src_block, tgt_block, EdgeType.CFG))
+                            
+                # 2. CALLS edges: 
+                # Keep METHOD-to-METHOD CALLS edges, and map BLOCK-to-METHOD CALLS edges
+                elif etype == EdgeType.CALLS:
+                    src_node = cpg.nodes.get(src_id)
+                    tgt_node = cpg.nodes.get(tgt_id)
+                    
+                    if src_node and tgt_node:
+                        # Method to Method
+                        if src_node.node_type == NodeType.METHOD and tgt_node.node_type == NodeType.METHOD:
+                            edge_key = (src_id, tgt_id, EdgeType.CALLS.value)
+                            if edge_key not in seen_edges:
+                                seen_edges.add(edge_key)
+                                new_edges.append((src_id, tgt_id, EdgeType.CALLS))
+                        # Block/Instruction to Method
+                        else:
+                            src_block = node_to_block.get(src_id)
+                            if src_block is not None and tgt_node.node_type == NodeType.METHOD:
+                                edge_key = (src_block, tgt_id, EdgeType.CALLS.value)
+                                if edge_key not in seen_edges:
+                                    seen_edges.add(edge_key)
+                                    new_edges.append((src_block, tgt_id, EdgeType.CALLS))
+                                    
+                # 3. DATA_FLOW edges: map instruction-level reaches to block-level reaches
+                elif etype == EdgeType.DATA_FLOW:
+                    src_block = node_to_block.get(src_id)
+                    tgt_block = node_to_block.get(tgt_id)
+                    if src_block is not None and tgt_block is not None and src_block != tgt_block:
+                        edge_key = (src_block, tgt_block, EdgeType.DATA_FLOW.value)
+                        if edge_key not in seen_edges:
+                            seen_edges.add(edge_key)
+                            new_edges.append((src_block, tgt_block, EdgeType.DATA_FLOW))
+            # 4. Connect METHOD to its contained BLOCK nodes using CFG edges
+            for edge in cpg.edges:
+                if edge.edge_type == EdgeType.AST:
+                    src_node = cpg.nodes.get(edge.source_id)
+                    tgt_node = cpg.nodes.get(edge.target_id)
+                    if src_node and tgt_node:
+                        if src_node.node_type == NodeType.METHOD and tgt_node.node_type == NodeType.BLOCK:
+                            edge_key = (edge.source_id, edge.target_id, EdgeType.CFG.value)
+                            if edge_key not in seen_edges:
+                                seen_edges.add(edge_key)
+                                new_edges.append((edge.source_id, edge.target_id, EdgeType.CFG))
+            
+            nodes = bb_nodes
+        else:
+            # Graph is already basic-block only, extract nodes and edges directly
+            nodes = list(cpg.nodes.values())
+            new_edges = []
+            for edge in cpg.edges:
+                if edge.edge_type in (EdgeType.CFG, EdgeType.CALLS, EdgeType.DATA_FLOW):
+                    new_edges.append((edge.source_id, edge.target_id, edge.edge_type))
+                    
+        # Apply max_nodes limit if needed
         if len(nodes) > self.max_nodes:
             nodes = nodes[:self.max_nodes]
-        
-        # Handle empty graphs
+            
         if not nodes:
             return self._empty_data()
-        
+            
         data.num_nodes = len(nodes)
         
-        # Create node ID mapping (for edges)
+        # Create node ID mapping
         node_id_map = {n.id: i for i, n in enumerate(nodes)}
         valid_ids = set(node_id_map.keys())
         
-        # Node features (simple encoding for now)
+        # Node features
         features = []
         node_types = []
         
         for node in nodes:
-            # Create feature vector
             feat = self._node_to_features(node)
             features.append(feat)
-            
-            # Get node type ID
             type_id = NODE_TYPE_MAP.get(node.node_type, 0)
             node_types.append(type_id)
-        
+            
         data.x = torch.stack(features)
         data.node_types = torch.tensor(node_types, dtype=torch.long)
         
-        # Edges
+        # Build edge tensors
         sources = []
         targets = []
         edge_types = []
         
-        for edge in cpg.edges:
-            if edge.source_id in valid_ids and edge.target_id in valid_ids:
-                sources.append(node_id_map[edge.source_id])
-                targets.append(node_id_map[edge.target_id])
-                edge_types.append(EDGE_TYPE_MAP.get(edge.edge_type, 0))
-        
+        for src, tgt, etype in new_edges:
+            if src in valid_ids and tgt in valid_ids:
+                sources.append(node_id_map[src])
+                targets.append(node_id_map[tgt])
+                edge_types.append(EDGE_TYPE_MAP.get(etype, 0))
+                
         if sources:
             data.edge_index = torch.tensor([sources, targets], dtype=torch.long)
             data.edge_types = torch.tensor(edge_types, dtype=torch.long)
         else:
             data.edge_index = torch.zeros((2, 0), dtype=torch.long)
             data.edge_types = torch.zeros(0, dtype=torch.long)
-        
+            
         data.num_edges = len(sources)
-        
         return data
     
     def _node_to_features(self, node) -> torch.Tensor:

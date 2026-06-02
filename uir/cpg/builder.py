@@ -59,9 +59,9 @@ class CPGBuilder:
             func_nodes[func.name] = method_node.id
             
             if not func.is_external and func.blocks:
-                self._build_function_body(cpg, func, method_node.id, block_nodes)
+                self._build_function_body(cpg, func, method_node.id, block_nodes, func_nodes)
         
-        # Create call graph edges
+        # Create call graph edges between METHOD nodes
         for func in lifted.functions:
             if func.name in func_nodes:
                 caller_id = func_nodes[func.name]
@@ -80,50 +80,37 @@ class CPGBuilder:
         return cpg
     
     def _build_function_body(self, cpg: CodePropertyGraph, func: Function, 
-                             method_id: int, block_nodes: Dict):
-        """Build nodes and edges for function body."""
+                             method_id: int, block_nodes: Dict, func_nodes: Dict):
+        """Build basic-block level nodes and pruned edges for a function."""
         
-        prev_block_id = None
-        
+        # 1. Create BLOCK nodes (no AST edges to METHOD or instruction nodes)
         for block in func.blocks:
-            # Create BLOCK node
+            # Concatenate all instructions' raw texts as the block code
+            block_code = "\n".join([inst.raw_text for inst in block.instructions if inst.raw_text])
+            
             block_node = cpg.create_node(
                 NodeType.BLOCK,
                 name=f"block_{block.block_id}",
+                code=block_code,
                 line_number=block.start_address,
-                attributes={'start': block.start_address, 'end': block.end_address}
+                attributes={
+                    'start': block.start_address,
+                    'end': block.end_address,
+                    'num_instructions': len(block.instructions)
+                }
             )
             block_nodes[(func.name, block.block_id)] = block_node.id
             
-            # AST edge: METHOD contains BLOCK
-            cpg.create_edge(method_id, block_node.id, EdgeType.AST)
-            
-            # CFG edge from previous block
-            if prev_block_id is not None and block.block_id == func.entry_block_id:
-                pass  # Entry block, no incoming edge from previous
-            elif prev_block_id is not None:
-                cpg.create_edge(prev_block_id, block_node.id, EdgeType.CFG)
-            
-            # Process instructions in block
-            prev_inst_id = None
-            for inst in block.instructions:
-                inst_node = self._instruction_to_node(cpg, inst)
-                
-                # AST edge: BLOCK contains instruction
-                cpg.create_edge(block_node.id, inst_node.id, EdgeType.AST)
-                
-                # CFG edge between sequential instructions
-                if prev_inst_id is not None:
-                    cpg.create_edge(prev_inst_id, inst_node.id, EdgeType.CFG)
-                
-                # Create operand nodes and data flow edges
-                self._build_operands(cpg, inst, inst_node.id)
-                
-                prev_inst_id = inst_node.id
-            
-            prev_block_id = block_node.id
+        # Connect METHOD to its entry BLOCK node via CFG edge
+        if func.entry_block_id is not None and (func.name, func.entry_block_id) in block_nodes:
+            entry_node_id = block_nodes[(func.name, func.entry_block_id)]
+            cpg.create_edge(method_id, entry_node_id, EdgeType.CFG)
+        elif func.blocks:
+            # Fallback to first block
+            entry_node_id = block_nodes[(func.name, func.blocks[0].block_id)]
+            cpg.create_edge(method_id, entry_node_id, EdgeType.CFG)
         
-        # Add CFG edges for block successors
+        # 2. Add CFG edges for block successors
         for block in func.blocks:
             if (func.name, block.block_id) in block_nodes:
                 src_id = block_nodes[(func.name, block.block_id)]
@@ -131,73 +118,102 @@ class CPGBuilder:
                     if (func.name, succ_id) in block_nodes:
                         tgt_id = block_nodes[(func.name, succ_id)]
                         cpg.create_edge(src_id, tgt_id, EdgeType.CFG)
-    
-    def _instruction_to_node(self, cpg: CodePropertyGraph, inst: Instruction) -> CPGNode:
-        """Convert an instruction to a CPG node."""
+                        
+        # 3. Add CALL graph edges from BLOCK to target METHOD nodes
+        for block in func.blocks:
+            if (func.name, block.block_id) in block_nodes:
+                block_node_id = block_nodes[(func.name, block.block_id)]
+                for inst in block.instructions:
+                    if inst.inst_type == InstructionType.CALL:
+                        called_names = []
+                        # Check operands first
+                        for op in inst.operands:
+                            if op.name and op.name in func_nodes:
+                                called_names.append(op.name)
+                            elif op.value and str(op.value) in func_nodes:
+                                called_names.append(str(op.value))
+                        # Check raw_text
+                        if inst.raw_text:
+                            clean_text = inst.raw_text.strip()
+                            if clean_text in func_nodes:
+                                called_names.append(clean_text)
+                            for part in clean_text.split():
+                                if part in func_nodes:
+                                    called_names.append(part)
+                                    
+                        for name in set(called_names):
+                            cpg.create_edge(block_node_id, func_nodes[name], EdgeType.CALLS)
+                            
+        # 4. Add DATAFLOW edges between blocks using basic-block level reaching definitions analysis
+        # Build CFG predecessor mapping for the function
+        predecessors = {b.block_id: list(b.predecessor_ids) for b in func.blocks}
+        # Fallback: if predecessor_ids are all empty, reconstruct from successor_ids
+        if all(not preds for preds in predecessors.values()):
+            for b in func.blocks:
+                for succ in b.successor_ids:
+                    if succ in predecessors:
+                        if b.block_id not in predecessors[succ]:
+                            predecessors[succ].append(b.block_id)
+                            
+        # Map variable -> list of block_ids that define it
+        def_blocks_map = {}
+        # Map block_id -> set of exposed uses (variables read before being defined in this block)
+        exposed_uses_map = {}
         
-        if inst.inst_type == InstructionType.CALL:
-            return cpg.create_node(
-                NodeType.CALL,
-                name=inst.raw_text or "call",
-                code=inst.raw_text,
-                line_number=inst.address,
-            )
-        
-        elif inst.inst_type == InstructionType.RETURN:
-            return cpg.create_node(
-                NodeType.RETURN,
-                name="return",
-                code=inst.raw_text,
-                line_number=inst.address,
-            )
-        
-        elif inst.inst_type in (InstructionType.BRANCH, InstructionType.CBRANCH):
-            control_type = ControlType.IF if inst.inst_type == InstructionType.CBRANCH else None
-            return cpg.create_node(
-                NodeType.CONTROL_STRUCTURE,
-                name="branch",
-                code=inst.raw_text,
-                line_number=inst.address,
-                control_type=control_type,
-            )
-        
-        else:
-            # Operator node
-            op_type = INSTRUCTION_TO_OPERATOR.get(inst.inst_type.value)
-            return cpg.create_node(
-                NodeType.OPERATOR,
-                name=inst.inst_type.value,
-                code=inst.raw_text,
-                line_number=inst.address,
-                operator_type=op_type,
-            )
-    
-    def _build_operands(self, cpg: CodePropertyGraph, inst: Instruction, inst_id: int):
-        """Build operand nodes and edges."""
-        for i, operand in enumerate(inst.operands):
-            if operand.op_type == 'constant':
-                # LITERAL node
-                node = cpg.create_node(
-                    NodeType.LITERAL,
-                    name=operand.name,
-                    value=operand.value,
-                    value_type=operand.op_type,
-                    order=i,
-                )
-            else:
-                # IDENTIFIER node
-                node = cpg.create_node(
-                    NodeType.IDENTIFIER,
-                    name=operand.name,
-                    order=i,
-                )
+        for b in func.blocks:
+            defined_in_block = set()
+            exposed_uses = set()
             
-            # ARGUMENT edge from instruction to operand
-            cpg.create_edge(inst_id, node.id, EdgeType.ARGUMENT)
+            for inst in b.instructions:
+                # Read/use operands
+                for op in inst.operands:
+                    if op.is_input and op.name and op.op_type != 'constant':
+                        if op.name not in defined_in_block:
+                            exposed_uses.add(op.name)
+                            
+                # Write/define operands
+                for op in inst.operands:
+                    if op.is_output and op.name and op.op_type != 'constant':
+                        defined_in_block.add(op.name)
+                        
+            exposed_uses_map[b.block_id] = exposed_uses
+            for var in defined_in_block:
+                if var not in def_blocks_map:
+                    def_blocks_map[var] = []
+                def_blocks_map[var].append(b.block_id)
+                
+        # Backward search on CFG to find reaching definitions for variable 'var' at block 'u_id'
+        def find_reaching_defs(u_id, var, def_blocks):
+            visited = set()
+            queue = list(predecessors.get(u_id, []))
+            reaching = set()
             
-            # DATA_FLOW edge for outputs
-            if operand.is_output:
-                cpg.create_edge(inst_id, node.id, EdgeType.DATA_FLOW)
+            while queue:
+                curr = queue.pop(0)
+                if curr in visited:
+                    continue
+                visited.add(curr)
+                
+                if curr in def_blocks:
+                    reaching.add(curr)
+                else:
+                    queue.extend(predecessors.get(curr, []))
+            return reaching
+            
+        # Draw DATAFLOW edges
+        for b in func.blocks:
+            u_id = b.block_id
+            if (func.name, u_id) not in block_nodes:
+                continue
+            u_node_id = block_nodes[(func.name, u_id)]
+            
+            for var in exposed_uses_map.get(u_id, set()):
+                if var in def_blocks_map:
+                    reaching = find_reaching_defs(u_id, var, def_blocks_map[var])
+                    for d_id in reaching:
+                        if (func.name, d_id) in block_nodes:
+                            d_node_id = block_nodes[(func.name, d_id)]
+                            cpg.create_edge(d_node_id, u_node_id, EdgeType.DATA_FLOW)
     
     def build_from_file(self, file_path: Path, lifter) -> Optional[CodePropertyGraph]:
         """Build CPG from a file using the provided lifter."""
