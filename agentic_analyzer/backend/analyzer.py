@@ -374,6 +374,7 @@ class AgenticMalwareAnalyzer:
             description=f"Examine call graph structure, imports, and strings, and identify known malicious graph motifs and sequence calls (e.g. OpenProcess -> VirtualAllocEx -> WriteProcessMemory -> CreateRemoteThread).\n\nCPG DATA:\n{cpg_context_str}",
             expected_output="Detailed graph pattern motifs found matching process injection or downloaders.",
             agent=agent_graph,
+            context=[],
             llm=self.llm
         )
 
@@ -382,6 +383,7 @@ class AgenticMalwareAnalyzer:
             description=f"Trace sensitive variable propagation, network-to-buffer decrypt logic, or registry-to-shellcode execution routes in the method subgraphs.\n\nCPG DATA:\n{cpg_context_str}",
             expected_output="Detailed data flow taint paths found.",
             agent=agent_df,
+            context=[],
             llm=self.llm
         )
 
@@ -390,6 +392,7 @@ class AgenticMalwareAnalyzer:
             description=f"Scan strictly for virtual memory manipulation APIs and indicators of process hollowing, reflective DLL loading, or APC injection.\n\nCPG DATA:\n{cpg_context_str}",
             expected_output="Highlights of virtual memory allocations and injection vectors.",
             agent=agent_mem,
+            context=[],
             llm=self.llm
         )
 
@@ -398,6 +401,7 @@ class AgenticMalwareAnalyzer:
             description=f"Scrutinize debugger evasion APIs, VM artifacts (CPUID, VMWare, VirtualBox), VBox indicators, and automated sandbox guest checks.\n\nCPG DATA:\n{cpg_context_str}",
             expected_output="Detailed anti-debugging, anti-VM, and anti-sandbox traits.",
             agent=agent_anti,
+            context=[],
             llm=self.llm
         )
 
@@ -406,6 +410,7 @@ class AgenticMalwareAnalyzer:
             description=f"Search for cryptographic library imports (AES, RC4, ChaCha20), classic XOR decryption loops, or custom ransomware file-traversal schemes.\n\nCPG DATA:\n{cpg_context_str}",
             expected_output="Identified string decryption routines or payload encryption ciphers.",
             agent=agent_crypto,
+            context=[],
             llm=self.llm
         )
 
@@ -414,6 +419,7 @@ class AgenticMalwareAnalyzer:
             description=f"Analyze persistent installation hooks including Run Keys, Scheduled Tasks, Windows Services, WMI hooks, COM hijacking, or DLL search order hijacking.\n\nCPG DATA:\n{cpg_context_str}",
             expected_output="Mapped boot-level persistence methods.",
             agent=agent_persist,
+            context=[],
             llm=self.llm
         )
 
@@ -422,6 +428,7 @@ class AgenticMalwareAnalyzer:
             description=f"Analyze credential token manipulation, SeDebugPrivilege token requests, driver loading (BYOVD), or UAC bypass flows.\n\nCPG DATA:\n{cpg_context_str}",
             expected_output="Discovered privilege escalation techniques.",
             agent=agent_priv,
+            context=[],
             llm=self.llm
         )
 
@@ -430,6 +437,7 @@ class AgenticMalwareAnalyzer:
             description=f"Analyze socket imports, WinINet/WinHTTP traffic endpoints, C2 beaconing strings, and data exfiltration patterns.\n\nCPG DATA:\n{cpg_context_str}",
             expected_output="Identified socket setups, downloader URLs, and HTTP C2 channels.",
             agent=agent_net,
+            context=[],
             llm=self.llm
         )
 
@@ -438,6 +446,7 @@ class AgenticMalwareAnalyzer:
             description=f"Analyze ROP chains, stack pivots, shellcode, and exploit primitives in instruction subgraphs.\n\nCPG DATA:\n{cpg_context_str}",
             expected_output="Discovered exploitation behaviors.",
             agent=agent_exploit,
+            context=[],
             llm=self.llm
         )
 
@@ -446,6 +455,7 @@ class AgenticMalwareAnalyzer:
             description=f"Examine control flow flattening, opaque predicates, indirect call graphs, and packers (UPX, Themida, VMProtect).\n\nCPG DATA:\n{cpg_context_str}",
             expected_output="Detailed unpacking and de-obfuscation assessment.",
             agent=agent_obfusc,
+            context=[],
             llm=self.llm
         )
 
@@ -454,6 +464,7 @@ class AgenticMalwareAnalyzer:
             description=f"Infer dynamic sequential capabilities (e.g. Credential Theft) by mapping the program flow actions instead of raw API listings.\n\nCPG DATA:\n{cpg_context_str}",
             expected_output="Logical capabilities map.",
             agent=agent_cap,
+            context=[],
             llm=self.llm
         )
 
@@ -462,6 +473,7 @@ class AgenticMalwareAnalyzer:
             description=f"Dissect nested PE binaries, resource blocks, embedded certificates, and version metadata info.\n\nCPG DATA:\n{cpg_context_str}",
             expected_output="Embedded resources summary.",
             agent=agent_embed,
+            context=[],
             llm=self.llm
         )
 
@@ -485,8 +497,8 @@ class AgenticMalwareAnalyzer:
 
         # 15. Audit and Verification Task
         task_verify = Task(
-            description=f"Audit every single claim made by the previous specialists. Cross-check each API call, sequence, and string behavior against literal imports, string logs, and CPG node definitions in the raw data. Remove or modify any claim that cannot be validated. Generate a verified claims trace table mapping claims to CPG Node IDs.\n\nCPG DATA:\n{cpg_context_str}",
-            expected_output="An audited findings trace table mapping each behavior claim to verified node targets.",
+            description=f"Audit every single claim made by the previous specialists. Cross-check each API call, sequence, and string behavior against literal imports, string logs, and CPG node definitions in the raw data. Remove or modify any claim that cannot be validated. Generate a verified claims trace table mapping claims to CPG Node IDs. Consolidate all verified findings, the MITRE mappings, and the malware family similarity scores into a single unified summary document.\n\nCPG DATA:\n{cpg_context_str}",
+            expected_output="A fully audited and verified specialist findings summary containing the verified claims trace table, verified MITRE mappings, and verified malware family similarity scores.",
             agent=agent_verifier,
             context=[task_graph, task_df, task_mem, task_anti, task_crypto, task_persist, task_priv, task_net, task_exploit, task_obfusc, task_cap, task_embed, task_mitre, task_sim],
             llm=self.llm
@@ -526,11 +538,7 @@ class AgenticMalwareAnalyzer:
             """,
             expected_output="The final executive markdown malware analysis report.",
             agent=agent_lead,
-            context=[
-                task_graph, task_df, task_mem, task_anti, task_crypto, 
-                task_persist, task_priv, task_net, task_exploit, task_obfusc, 
-                task_cap, task_embed, task_mitre, task_sim, task_verify
-            ],
+            context=[task_verify],
             llm=self.llm
         )
 

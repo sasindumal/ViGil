@@ -39,20 +39,23 @@ class Config:
             return LLM(
                 model=cls.OPENAI_MODEL_NAME,
                 api_key=cls.OPENAI_API_KEY,
-                temperature=0.1
+                temperature=0.1,
+                timeout=600
             )
         elif cls.LLM_PROVIDER == "ollama":
             return LLM(
                 model=f"ollama/{cls.OLLAMA_MODEL_NAME}",
                 base_url=cls.OLLAMA_API_BASE,
-                temperature=0.1
+                temperature=0.1,
+                timeout=600
             )
         elif cls.LLM_PROVIDER == "lmstudio":
             return LLM(
                 model=f"openai/{cls.LMSTUDIO_MODEL_NAME}",
                 base_url=cls.LMSTUDIO_API_BASE,
                 api_key="lmstudio",
-                temperature=0.1
+                temperature=0.1,
+                timeout=600
             )
         else:
             raise ValueError(f"Unknown LLM_PROVIDER: {cls.LLM_PROVIDER}")
