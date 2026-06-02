@@ -91,6 +91,11 @@ class Trainer:
         
         self.best_val_acc = 0.0
         self.patience_counter = 0
+        
+        # Unique timestamped model filename for this training run
+        import datetime
+        self.timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.checkpoint_filename = f"best_model_{self.timestamp}.pt"
     
     def train_epoch(self, train_loader: DataLoader) -> Dict[str, float]:
         """Train for one epoch."""
@@ -224,7 +229,7 @@ class Trainer:
                 if val_metrics['accuracy'] > self.best_val_acc:
                     self.best_val_acc = val_metrics['accuracy']
                     self.patience_counter = 0
-                    self.save_checkpoint(self.config.checkpoint_dir / "best_model.pt")
+                    self.save_checkpoint(self.config.checkpoint_dir / self.checkpoint_filename)
                 else:
                     self.patience_counter += 1
                     if self.patience_counter >= self.config.early_stopping_patience:

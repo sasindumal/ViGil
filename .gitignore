@@ -3,3 +3,5 @@
 /uir/model/__pycache__
 /cpg_cache
 /malware_dataset
+/checkpoints
+.DS_Store
