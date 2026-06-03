@@ -165,7 +165,7 @@ def cmd_train(args):
     
     # Create dataset
     logger.info(f"Loading dataset from: {data_dir}")
-    dataset = CPGDataset(data_dir)
+    dataset = CPGDataset(data_dir, embedding_dim=model_config.embedding_dim)
     logger.info(f"Dataset size: {len(dataset)}")
     
     # Get labels for stratified split
@@ -210,7 +210,7 @@ def cmd_train(args):
     
     # Create model
     model = HeterogeneousGraphTransformer(
-        input_dim=256,
+        input_dim=model_config.embedding_dim,
         hidden_dim=model_config.hidden_dim,
         num_layers=model_config.num_layers,
         num_heads=model_config.num_heads,

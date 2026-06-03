@@ -65,7 +65,7 @@ class TestHGTModel(unittest.TestCase):
         num_classes = 2
         
         model = HeterogeneousGraphTransformer(
-            input_dim=256,
+            input_dim=320,
             hidden_dim=hidden_dim,
             num_node_types=11,
             num_edge_types=8,
@@ -77,7 +77,7 @@ class TestHGTModel(unittest.TestCase):
         
         # Create mock batch of graphs
         num_nodes = 50
-        x = torch.randn(num_nodes, 256)
+        x = torch.randn(num_nodes, 320)
         
         # Random edge index
         edge_index = torch.stack([
@@ -113,6 +113,13 @@ class TestCPGDatasetAndFeatures(unittest.TestCase):
         
         # Create a mock CPG and save to JSON
         cpg = CodePropertyGraph(source_file="benign_test_sample.py")
+        cpg.metadata = {
+            "imports": ["KERNEL32.dll!VirtualAlloc", "WS2_32.dll!connect"],
+            "architecture": "x64",
+            "subsystem": 2,
+            "strings": ["hello", "world"],
+            "exports": []
+        }
         
         # Add 12 nodes (we want to test BFS sampling with max_nodes=5)
         # Methods:
@@ -149,7 +156,7 @@ class TestCPGDatasetAndFeatures(unittest.TestCase):
         """Test dataset loading, n-gram hashing, structural features, and BFS sampling."""
         dataset = CPGDataset(
             cpg_dir=self.temp_dir,
-            embedding_dim=256,
+            embedding_dim=320,
             max_nodes=4 # Limit to 4 to trigger BFS sampling
         )
         
@@ -162,18 +169,18 @@ class TestCPGDatasetAndFeatures(unittest.TestCase):
         self.assertEqual(data.num_nodes, 4)
         
         # Check node features shape
-        self.assertEqual(data.x.shape, (4, 256))
+        self.assertEqual(data.x.shape, (4, 320))
         
         # Check structural features
-        # Node features should have non-zero elements at degrees (indices 10..28)
-        self.assertTrue((data.x[:, 10:29] >= 0).all())
+        # Node features should have non-zero elements at degrees (indices 11..29)
+        self.assertTrue((data.x[:, 11:30] >= 0).all())
         
         # Check that we populated n-gram buckets (indices 32..99)
         name_grams_active = (data.x[:, 32:100] == 1.0).any()
         self.assertTrue(name_grams_active)
         
-        # Check context features (indices 150..152)
-        self.assertTrue((data.x[:, 150:153] > 0).any())
+        # Check global / context features (indices 210..284)
+        self.assertTrue((data.x[:, 210:285] > 0).any())
 
 
 class TestTrainer(unittest.TestCase):
@@ -181,7 +188,7 @@ class TestTrainer(unittest.TestCase):
     def test_lr_scheduler_and_loss(self):
         """Verify learning rate scheduler and loss constructor works."""
         model = HeterogeneousGraphTransformer(
-            input_dim=256,
+            input_dim=320,
             hidden_dim=32,
             num_node_types=11,
             num_edge_types=8,
@@ -213,7 +220,7 @@ class TestTrainer(unittest.TestCase):
         
         # Test loss function is indeed Label Smoothed CrossEntropyLoss
         self.assertIsInstance(trainer.ce_loss, nn.CrossEntropyLoss)
-        self.assertEqual(trainer.ce_loss.label_smoothing, 0.1)
+        self.assertEqual(trainer.ce_loss.label_smoothing, config.label_smoothing)
 
 
 if __name__ == "__main__":

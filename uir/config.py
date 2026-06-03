@@ -275,10 +275,11 @@ class TokenizationConfig(BaseModel):
 
 class ModelConfig(BaseModel):
     """Configuration for the HGT model."""
+    embedding_dim: int = Field(default_factory=lambda: get_env_int("EMBEDDING_DIM", 320))
     hidden_dim: int = Field(default_factory=lambda: get_env_int("HIDDEN_DIM", 256))
     num_heads: int = Field(default_factory=lambda: get_env_int("NUM_HEADS", 8))
     num_layers: int = Field(default_factory=lambda: get_env_int("NUM_LAYERS", 4))
-    dropout: float = Field(default_factory=lambda: get_env_float("DROPOUT", 0.1))
+    dropout: float = Field(default_factory=lambda: get_env_float("DROPOUT", 0.15))
     num_classes: int = Field(default_factory=lambda: get_env_int("NUM_CLASSES", 2))
 
 

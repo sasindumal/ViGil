@@ -311,7 +311,7 @@ class HeterogeneousGraphTransformer(nn.Module):
     """
     
     def __init__(self,
-                 input_dim: int = 256,
+                 input_dim: int = 320,
                  hidden_dim: int = 256,
                  num_node_types: int = 10,
                  num_edge_types: int = 6,

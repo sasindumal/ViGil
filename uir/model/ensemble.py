@@ -10,7 +10,7 @@ from typing import List, Tuple, Dict, Any, Optional
 from pathlib import Path
 
 from .hgt import HeterogeneousGraphTransformer
-from .dataset import CPGData
+from .dataset import CPGData, EMBEDDING_DIM
 from ..config import default_config
 
 
@@ -21,11 +21,12 @@ class EnsembleModel:
         self.device = device
         self.models = []
         
-        # Determine architecture settings from default config
+        # Determine architecture settings from config
         hidden_dim = default_config.model.hidden_dim
         num_layers = default_config.model.num_layers
         num_heads = default_config.model.num_heads
         num_classes = default_config.model.num_classes
+        input_dim = default_config.model.embedding_dim
         
         for path in model_paths:
             path = Path(path)
@@ -34,7 +35,7 @@ class EnsembleModel:
                 
             checkpoint = torch.load(path, map_location=device)
             model = HeterogeneousGraphTransformer(
-                input_dim=256,
+                input_dim=input_dim,
                 hidden_dim=hidden_dim,
                 num_layers=num_layers,
                 num_heads=num_heads,
