@@ -70,7 +70,9 @@ def _process_single_file(args: tuple) -> tuple:
 
             sub_dir.mkdir(parents=True, exist_ok=True)
             output_path = sub_dir / f"{file_path.stem}.cpg.json"
+            image_output_path = sub_dir / f"{file_path.stem}.png"
 
+            # Save CPG
             # Use optimized serialization if available
             if use_fast_serialization:
                 try:
@@ -80,10 +82,18 @@ def _process_single_file(args: tuple) -> tuple:
             else:
                 cpg.save(output_path)
 
+            # Save grayscale image of the binary
+            try:
+                processor.save_image(file_path, image_output_path)
+            except Exception as img_err:
+                logger.warning(f"Failed to generate image for {file_path}: {img_err}")
+
         return (file_path_str, True, None, cpg.num_nodes)
 
     except Exception as e:
         return (file_path_str, False, str(e), 0)
+
+
 
 
 class BatchProcessor:

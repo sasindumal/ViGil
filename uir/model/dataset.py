@@ -221,6 +221,7 @@ class CPGData:
         self.edge_index: Optional[torch.Tensor] = None  # [2, E]
         self.node_types: Optional[torch.Tensor] = None  # [N]
         self.edge_types: Optional[torch.Tensor] = None  # [E]
+        self.image: Optional[torch.Tensor] = None       # Image features [3, 224, 224]
         self.y: Optional[torch.Tensor] = None           # [1]
         self.num_nodes: int = 0
         self.num_edges: int = 0
@@ -233,11 +234,13 @@ class CPGData:
         data.edge_index = self.edge_index.to(device) if self.edge_index is not None else None
         data.node_types = self.node_types.to(device) if self.node_types is not None else None
         data.edge_types = self.edge_types.to(device) if self.edge_types is not None else None
+        data.image = self.image.to(device) if self.image is not None else None
         data.y = self.y.to(device) if self.y is not None else None
         data.num_nodes = self.num_nodes
         data.num_edges = self.num_edges
         data.file_path = self.file_path
         return data
+
 
 
 class CPGDataset(Dataset):
@@ -292,12 +295,40 @@ class CPGDataset(Dataset):
                 else:
                     data.y = torch.tensor([0], dtype=torch.long)
 
+            # Load corresponding grayscale image
+            image_path = cpg_path.with_suffix(".png")
+            if not image_path.exists():
+                # Try finding it in the same folder by replacing .cpg.json with .png
+                image_path = Path(str(cpg_path).replace(".cpg.json", ".png"))
+                
+            from PIL import Image
+            import torchvision.transforms as transforms
+            
+            # ImageNet normalization transforms for RGB images
+            image_transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
+            
+            if image_path.exists():
+                try:
+                    img = Image.open(image_path).convert('RGB')
+                    data.image = image_transform(img)
+                except Exception as img_err:
+                    logger.warning(f"Error reading image {image_path}: {img_err}")
+                    # Zero fallback
+                    data.image = torch.zeros((3, 224, 224))
+            else:
+                # Zero fallback if image doesn't exist yet
+                data.image = torch.zeros((3, 224, 224))
+
             data.file_path = str(cpg_path)
             return data
 
         except Exception as e:
             logger.error(f"Error loading {cpg_path}: {e}")
             return self._empty_data()
+
 
     def _cpg_to_data(self, cpg: CodePropertyGraph) -> CPGData:
         """Convert CPG to tensor data with rich feature engineering."""
@@ -750,6 +781,8 @@ def collate_cpg_batch(batch: List[CPGData]) -> Tuple[CPGData, torch.Tensor]:
     batches = []
     node_offset = 0
 
+    images = []
+    
     for i, data in enumerate(batch):
         xs.append(data.x)
         node_types.append(data.node_types)
@@ -761,11 +794,18 @@ def collate_cpg_batch(batch: List[CPGData]) -> Tuple[CPGData, torch.Tensor]:
         ys.append(data.y)
         batches.append(torch.full((data.num_nodes,), i, dtype=torch.long))
         node_offset += data.num_nodes
+        
+        # Load or generate fallback image if None
+        if data.image is not None:
+            images.append(data.image)
+        else:
+            images.append(torch.zeros((3, 224, 224)))
 
     combined = CPGData()
     combined.x = torch.cat(xs, dim=0)
     combined.node_types = torch.cat(node_types, dim=0)
     combined.y = torch.cat(ys, dim=0)
+    combined.image = torch.stack(images, dim=0)
 
     if edge_indices:
         combined.edge_index = torch.cat(edge_indices, dim=1)
@@ -776,3 +816,4 @@ def collate_cpg_batch(batch: List[CPGData]) -> Tuple[CPGData, torch.Tensor]:
 
     batch_tensor = torch.cat(batches, dim=0)
     return combined, batch_tensor
+

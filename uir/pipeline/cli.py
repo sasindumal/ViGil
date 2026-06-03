@@ -208,8 +208,11 @@ def cmd_train(args):
     
     logger.info(f"Train: {len(train_indices)}, Val: {len(val_indices)}, Test: {len(test_indices)} (stratified)")
     
-    # Create model
-    model = HeterogeneousGraphTransformer(
+    # Create joint model components
+    from ..model.joint_model import LoraLevitFeatureExtractor, BayesianClassifier, JointMalwareModel
+    from ..model.joint_trainer import JointTrainer
+    
+    hgt_model = HeterogeneousGraphTransformer(
         input_dim=model_config.embedding_dim,
         hidden_dim=model_config.hidden_dim,
         num_layers=model_config.num_layers,
@@ -217,11 +220,20 @@ def cmd_train(args):
         num_classes=model_config.num_classes
     )
     
+    levit_extractor = LoraLevitFeatureExtractor()
+    
+    bnn_classifier = BayesianClassifier(
+        in_features=model_config.hidden_dim * 2 + 384,
+        num_classes=model_config.num_classes
+    )
+    
+    model = JointMalwareModel(hgt_model, levit_extractor, bnn_classifier)
+    
     # Train
-    trainer = Trainer(model, train_config)
+    trainer = JointTrainer(model, train_config)
     history = trainer.train(train_dataset, val_dataset)
     
-    logger.info(f"Training complete. Best val accuracy: {trainer.best_val_acc:.4f}")
+    logger.info(f"Training complete. Best val F1 score: {trainer.best_val_f1:.4f}")
     
     # Evaluate on the held-out test set
     if args.test:
@@ -238,11 +250,14 @@ def cmd_train(args):
 
 
 def cmd_predict(args):
-    """Run prediction on a file."""
+    """Run prediction on a file using the multimodal joint model with BNN uncertainty sampling."""
     import torch
+    import torchvision.transforms as transforms
     from .processor import FileProcessor
     from ..model.hgt import HeterogeneousGraphTransformer
-    from ..model.dataset import CPGData
+    from ..model.joint_model import LoraLevitFeatureExtractor, BayesianClassifier, JointMalwareModel
+    from ..model.dataset import CPGDataset, collate_cpg_batch
+    from ..extraction.image_generator import pe_to_grayscale_image
     from ..config import UIRConfig
     
     model_path = Path(args.model)
@@ -252,26 +267,79 @@ def cmd_predict(args):
         logger.error(f"Model not found: {model_path}")
         return 1
     
-    # Load model
+    config = UIRConfig()
+    
+    # Reconstruct identical joint architecture for loading state
+    hgt_model = HeterogeneousGraphTransformer(
+        input_dim=config.model.embedding_dim,
+        hidden_dim=config.model.hidden_dim,
+        num_layers=config.model.num_layers,
+        num_heads=config.model.num_heads,
+        num_classes=config.model.num_classes
+    )
+    levit_extractor = LoraLevitFeatureExtractor()
+    bnn_classifier = BayesianClassifier(
+        in_features=config.model.hidden_dim * 2 + 384,
+        num_classes=config.model.num_classes
+    )
+    model = JointMalwareModel(hgt_model, levit_extractor, bnn_classifier)
+    
+    # Load model checkpoint
+    logger.info(f"Loading joint model checkpoint from {model_path}")
     checkpoint = torch.load(model_path, map_location='cpu')
-    model = HeterogeneousGraphTransformer()
     model.load_state_dict(checkpoint['model_state'])
     model.eval()
     
-    # Process file
-    config = UIRConfig()
+    # Process single file (CPG extraction)
     processor = FileProcessor(config)
-    cpg = processor.process(input_path)
+    logger.info(f"Processing CPG for: {input_path}")
+    cpg = processor.process(input_path, use_cache=False)
     
     if not cpg:
-        logger.error("Failed to process file")
+        logger.error("Failed to build CPG")
         return 1
+        
+    # Convert CPG to features using CPGDataset converter
+    dataset = CPGDataset(cpg_dir=Path("./cpg_cache")) # Dummy target dir
+    data = dataset._cpg_to_data(cpg)
     
-    # TODO: Convert CPG to tensor data and run prediction
-    # This requires implementing the full embedding pipeline
+    # Generate and load corresponding grayscale image
+    logger.info(f"Generating grayscale image representation...")
+    img = pe_to_grayscale_image(input_path, target_size=224)
+    img_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    data.image = img_transform(img)
     
-    logger.info("Prediction complete")
+    # Collate single element into a batch
+    batch_data, batch_idx = collate_cpg_batch([data])
+    
+    # Run BNN inference with Monte Carlo sampling (T = 20)
+    logger.info("Running Bayesian Neural Network Monte Carlo sampling...")
+    preds, confidence, variance = model.predict_with_confidence(
+        batch_data.x, batch_data.edge_index,
+        batch_data.node_types, batch_data.edge_types,
+        batch_idx, batch_data.image,
+        num_samples=20
+    )
+    
+    pred_class = preds[0].item()
+    conf_score = confidence[0].item()
+    epistemic_var = variance[0].item()
+    
+    label_map = {0: "BENIGN", 1: "MALWARE"}
+    print("\n" + "=" * 60)
+    print("      JOINT MULTIMODAL MALWARE DETECTION PREDICTION")
+    print("=" * 60)
+    print(f"  Target File:       {input_path.name}")
+    print(f"  Malware Detection: {label_map.get(pred_class, 'UNKNOWN')}")
+    print(f"  Confidence Level:  {conf_score * 100:.2f}%")
+    print(f"  Epistemic Var:     {epistemic_var:.6f}")
+    print("=" * 60 + "\n")
+    
     return 0
+
 
 
 def main():
