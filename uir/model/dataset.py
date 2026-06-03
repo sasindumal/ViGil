@@ -257,12 +257,57 @@ class CPGDataset(Dataset):
                 if edge.edge_type in (EdgeType.CFG, EdgeType.CALLS, EdgeType.DATA_FLOW):
                     new_edges.append((edge.source_id, edge.target_id, edge.edge_type))
                     
-        # Apply max_nodes limit if needed
+        # Apply max_nodes limit if needed via BFS subgraph sampling
         if len(nodes) > self.max_nodes:
-            nodes = nodes[:self.max_nodes]
+            # Find method entry points as seed nodes
+            start_nodes = [n.id for n in nodes if n.node_type == NodeType.METHOD]
+            if not start_nodes:
+                start_nodes = [nodes[0].id]
+            
+            # Build adjacency mapping (undirected for connectivity)
+            adj = {}
+            for src, tgt, etype in new_edges:
+                adj.setdefault(src, []).append(tgt)
+                adj.setdefault(tgt, []).append(src)
+            
+            visited = set(start_nodes)
+            queue = list(start_nodes)
+            while queue and len(visited) < self.max_nodes:
+                curr = queue.pop(0)
+                for neighbor in adj.get(curr, []):
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        queue.append(neighbor)
+                        if len(visited) >= self.max_nodes:
+                            break
+            
+            # If we still haven't reached max_nodes, add more
+            if len(visited) < self.max_nodes:
+                for n in nodes:
+                    if n.id not in visited:
+                        visited.add(n.id)
+                        if len(visited) >= self.max_nodes:
+                            break
+            
+            # Filter nodes and edges
+            nodes = [n for n in nodes if n.id in visited]
+            new_edges = [(src, tgt, etype) for src, tgt, etype in new_edges if src in visited and tgt in visited]
             
         if not nodes:
             return self._empty_data()
+            
+        # Compute node degrees on filtered graph
+        in_degrees = {}
+        out_degrees = {}
+        edge_in_degrees = {}   # (node_id, edge_type_idx) -> count
+        edge_out_degrees = {}  # (node_id, edge_type_idx) -> count
+        
+        for src, tgt, etype in new_edges:
+            et_idx = EDGE_TYPE_MAP.get(etype, 0)
+            out_degrees[src] = out_degrees.get(src, 0) + 1
+            in_degrees[tgt] = in_degrees.get(tgt, 0) + 1
+            edge_out_degrees[(src, et_idx)] = edge_out_degrees.get((src, et_idx), 0) + 1
+            edge_in_degrees[(tgt, et_idx)] = edge_in_degrees.get((tgt, et_idx), 0) + 1
             
         data.num_nodes = len(nodes)
         
@@ -274,8 +319,26 @@ class CPGDataset(Dataset):
         features = []
         node_types = []
         
+        total_nodes = len(nodes)
+        total_edges = len(new_edges)
+        
         for node in nodes:
-            feat = self._node_to_features(node)
+            n_in = in_degrees.get(node.id, 0)
+            n_out = out_degrees.get(node.id, 0)
+            
+            # Gather edge-specific counts
+            etype_in = {et_idx: edge_in_degrees.get((node.id, et_idx), 0) for et_idx in range(8)}
+            etype_out = {et_idx: edge_out_degrees.get((node.id, et_idx), 0) for et_idx in range(8)}
+            
+            feat = self._node_to_features(
+                node,
+                in_deg=n_in,
+                out_deg=n_out,
+                etype_in_deg=etype_in,
+                etype_out_deg=etype_out,
+                total_nodes=total_nodes,
+                total_edges=total_edges
+            )
             features.append(feat)
             type_id = NODE_TYPE_MAP.get(node.node_type, 0)
             node_types.append(type_id)
@@ -304,28 +367,73 @@ class CPGDataset(Dataset):
         data.num_edges = len(sources)
         return data
     
-    def _node_to_features(self, node) -> torch.Tensor:
-        """Convert node to feature vector with deterministic hashing and semantic composition."""
+    def _node_to_features(self, node,
+                           in_deg: int = 0,
+                           out_deg: int = 0,
+                           etype_in_deg: Dict[int, int] = None,
+                           etype_out_deg: Dict[int, int] = None,
+                           total_nodes: int = 1,
+                           total_edges: int = 0) -> torch.Tensor:
+        """Convert node to feature vector with deterministic hashing, degrees, context, and n-grams."""
         feat = torch.zeros(self.embedding_dim)
+        import math
         
-        # Encode node type
+        # Helper for deterministic hashing
+        def deterministic_hash(s: str) -> int:
+            h = 0
+            for char in s:
+                h = (31 * h + ord(char)) & 0xFFFFFFFF
+            return h
+        
+        # 1. Encode node type (dims 0..10)
         type_id = NODE_TYPE_MAP.get(node.node_type, 0)
-        feat[type_id] = 1.0
+        if 0 <= type_id < 11:
+            feat[type_id] = 1.0
         
-        # Encode some attributes
+        # 2. Structural features (dims 10..28)
+        # Normalize with log(x + 1)
+        feat[10] = math.log1p(in_deg) / 5.0
+        feat[11] = math.log1p(out_deg) / 5.0
+        feat[12] = math.log1p(in_deg + out_deg) / 5.0
+        
+        # Edge-type specific in-degrees (dims 13..20)
+        if etype_in_deg:
+            for et_idx, count in etype_in_deg.items():
+                if 0 <= et_idx < 8:
+                    feat[13 + et_idx] = math.log1p(count) / 5.0
+                    
+        # Edge-type specific out-degrees (dims 21..28)
+        if etype_out_deg:
+            for et_idx, count in etype_out_deg.items():
+                if 0 <= et_idx < 8:
+                    feat[21 + et_idx] = math.log1p(count) / 5.0
+        
+        # 3. Attributes (dims 29..31)
         if node.is_external:
-            feat[20] = 1.0
+            feat[29] = 1.0
         
         if node.line_number > 0:
-            feat[21] = min(node.line_number / 1000, 1.0)
-        
-        # Deterministic hashing of the name
-        if node.name:
-            name_bytes = node.name.encode('utf-8', errors='ignore')
-            name_hash = int(hashlib.md5(name_bytes).hexdigest(), 16) % 50
-            feat[50 + name_hash] = 1.0
+            feat[30] = min(node.line_number / 1000.0, 1.0)
             
-        # Populate instruction composition features for BLOCK nodes
+        # 4. Character n-gram multi-hash (dims 32..99)
+        if node.name:
+            name = node.name.lower()
+            ngrams = [name[i:i+3] for i in range(len(name)-2)]
+            if not ngrams:
+                ngrams = [name]
+            
+            num_buckets = 68
+            start_bucket = 32
+            for ng in ngrams:
+                ng_bytes = ng.encode('utf-8', errors='ignore')
+                h1 = int(hashlib.md5(ng_bytes).hexdigest(), 16) % num_buckets
+                h2 = int(hashlib.sha1(ng_bytes).hexdigest(), 16) % num_buckets
+                h3 = deterministic_hash(ng) % num_buckets
+                feat[start_bucket + h1] = 1.0
+                feat[start_bucket + h2] = 1.0
+                feat[start_bucket + h3] = 1.0
+            
+        # 5. Populate instruction composition features for BLOCK nodes (dims 100..131)
         if node.node_type == NodeType.BLOCK:
             inst_counts = node.attributes.get('inst_counts', {})
             for k, count in inst_counts.items():
@@ -333,6 +441,11 @@ class CPGDataset(Dataset):
                     idx = INST_KEY_TO_IDX[k]
                     # Normalize frequency count
                     feat[idx] = min(count / 10.0, 1.0)
+                    
+        # 6. Graph-level context features (dims 150..152)
+        feat[150] = math.log1p(total_nodes) / 10.0
+        feat[151] = math.log1p(total_edges) / 10.0
+        feat[152] = total_edges / max(total_nodes, 1)  # average degree/density
         
         return feat
     

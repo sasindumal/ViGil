@@ -296,6 +296,26 @@ class TrainingConfig(BaseModel):
     train_ratio: float = Field(default_factory=lambda: get_env_float("TRAIN_RATIO", 0.8))
     val_ratio: float = Field(default_factory=lambda: get_env_float("VAL_RATIO", 0.1))
     test_ratio: float = Field(default_factory=lambda: get_env_float("TEST_RATIO", 0.1))
+    
+    # Learning rate scheduling
+    use_lr_scheduler: bool = Field(default_factory=lambda: get_env_bool("USE_LR_SCHEDULER", True))
+    lr_scheduler_type: str = Field(default_factory=lambda: os.getenv("LR_SCHEDULER_TYPE", "cosine_warmup"))
+    warmup_epochs: int = Field(default_factory=lambda: get_env_int("WARMUP_EPOCHS", 5))
+    min_lr: float = Field(default_factory=lambda: get_env_float("MIN_LR", 1e-6))
+    
+    # Label smoothing and focal loss
+    label_smoothing: float = Field(default_factory=lambda: get_env_float("LABEL_SMOOTHING", 0.1))
+    use_focal_loss: bool = Field(default_factory=lambda: get_env_bool("USE_FOCAL_LOSS", False))
+    focal_loss_gamma: float = Field(default_factory=lambda: get_env_float("FOCAL_LOSS_GAMMA", 2.0))
+    
+    # EMA (Exponential Moving Average)
+    use_ema: bool = Field(default_factory=lambda: get_env_bool("USE_EMA", True))
+    ema_decay: float = Field(default_factory=lambda: get_env_float("EMA_DECAY", 0.999))
+    
+    # Data augmentation
+    use_augmentation: bool = Field(default_factory=lambda: get_env_bool("USE_AUGMENTATION", True))
+    aug_feature_mask_rate: float = Field(default_factory=lambda: get_env_float("AUG_FEATURE_MASK_RATE", 0.15))
+    aug_edge_drop_rate: float = Field(default_factory=lambda: get_env_float("AUG_EDGE_DROP_RATE", 0.05))
 
 
 class UIRConfig(BaseModel):
