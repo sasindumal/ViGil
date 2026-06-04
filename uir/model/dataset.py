@@ -221,7 +221,9 @@ class CPGData:
         self.edge_index: Optional[torch.Tensor] = None  # [2, E]
         self.node_types: Optional[torch.Tensor] = None  # [N]
         self.edge_types: Optional[torch.Tensor] = None  # [E]
-        self.image: Optional[torch.Tensor] = None       # Image features [3, 224, 224]
+        self.image: Optional[torch.Tensor] = None       # Grayscale image [3, 224, 224]
+        self.pe_bytes: Optional[torch.Tensor] = None    # Byte sequence  [1, 1024]
+        self.api_tokens: Optional[torch.Tensor] = None  # API token IDs  [max_apis]
         self.y: Optional[torch.Tensor] = None           # [1]
         self.num_nodes: int = 0
         self.num_edges: int = 0
@@ -235,6 +237,8 @@ class CPGData:
         data.node_types = self.node_types.to(device) if self.node_types is not None else None
         data.edge_types = self.edge_types.to(device) if self.edge_types is not None else None
         data.image = self.image.to(device) if self.image is not None else None
+        data.pe_bytes = self.pe_bytes.to(device) if self.pe_bytes is not None else None
+        data.api_tokens = self.api_tokens.to(device) if self.api_tokens is not None else None
         data.y = self.y.to(device) if self.y is not None else None
         data.num_nodes = self.num_nodes
         data.num_edges = self.num_edges
@@ -297,9 +301,12 @@ class CPGDataset(Dataset):
 
             # Load corresponding grayscale image
             image_path = cpg_path.with_suffix(".png")
-            if not image_path.exists():
+            if not image_path.exists() or image_path == cpg_path:
                 # Try finding it in the same folder by replacing .cpg.json with .png
                 image_path = Path(str(cpg_path).replace(".cpg.json", ".png"))
+                if not image_path.exists() or image_path == cpg_path:
+                    # Resolve to a path that does not exist to trigger default fallback
+                    image_path = cpg_path.parent / "nonexistent_dummy_image.png"
                 
             from PIL import Image
             import torchvision.transforms as transforms
@@ -321,6 +328,26 @@ class CPGDataset(Dataset):
             else:
                 # Zero fallback if image doesn't exist yet
                 data.image = torch.zeros((3, 224, 224))
+
+            # ── RansomFormer inputs: PE bytes + API tokens ─────────────────────
+            # pe_bytes: sliding-window byte sequence over the original PE file
+            # api_tokens: hashed API import names from CPG metadata
+            try:
+                from ..extraction.pe_feature_extractor import extract_ransomformer_features
+                source_pe = Path(cpg.source_file) if cpg.source_file else None
+                api_names = list(cpg.metadata.get('imports', [])) if cpg.metadata else []
+                if source_pe and source_pe.exists():
+                    data.pe_bytes, data.api_tokens = extract_ransomformer_features(
+                        source_pe, api_names=api_names
+                    )
+                else:
+                    from ..extraction.pe_feature_extractor import extract_api_tokens, BYTE_SEQ_LEN, MAX_APIS
+                    data.pe_bytes = torch.zeros(1, BYTE_SEQ_LEN)
+                    data.api_tokens = extract_api_tokens(api_names)
+            except Exception as rf_err:
+                logger.warning(f"RansomFormer feature extraction failed: {rf_err}")
+                data.pe_bytes = torch.zeros(1, 1024)
+                data.api_tokens = torch.zeros(256, dtype=torch.long)
 
             data.file_path = str(cpg_path)
             return data
@@ -765,6 +792,9 @@ class CPGDataset(Dataset):
         data.edge_index = torch.zeros((2, 0), dtype=torch.long)
         data.node_types = torch.zeros(1, dtype=torch.long)
         data.edge_types = torch.zeros(0, dtype=torch.long)
+        data.image = torch.zeros((3, 224, 224))
+        data.pe_bytes = torch.zeros(1, 1024)
+        data.api_tokens = torch.zeros(256, dtype=torch.long)
         data.y = torch.tensor([0], dtype=torch.long)
         data.num_nodes = 1
         data.num_edges = 0
@@ -782,7 +812,9 @@ def collate_cpg_batch(batch: List[CPGData]) -> Tuple[CPGData, torch.Tensor]:
     node_offset = 0
 
     images = []
-    
+    pe_bytes_list = []
+    api_tokens_list = []
+
     for i, data in enumerate(batch):
         xs.append(data.x)
         node_types.append(data.node_types)
@@ -794,18 +826,32 @@ def collate_cpg_batch(batch: List[CPGData]) -> Tuple[CPGData, torch.Tensor]:
         ys.append(data.y)
         batches.append(torch.full((data.num_nodes,), i, dtype=torch.long))
         node_offset += data.num_nodes
-        
-        # Load or generate fallback image if None
+
+        # Image fallback
         if data.image is not None:
             images.append(data.image)
         else:
-            images.append(torch.zeros((3, 224, 224)))
+            images.append(torch.zeros(3, 224, 224))
+
+        # PE byte sequence fallback
+        if data.pe_bytes is not None:
+            pe_bytes_list.append(data.pe_bytes)
+        else:
+            pe_bytes_list.append(torch.zeros(1, 1024))
+
+        # API token fallback
+        if data.api_tokens is not None:
+            api_tokens_list.append(data.api_tokens)
+        else:
+            api_tokens_list.append(torch.zeros(256, dtype=torch.long))
 
     combined = CPGData()
     combined.x = torch.cat(xs, dim=0)
     combined.node_types = torch.cat(node_types, dim=0)
     combined.y = torch.cat(ys, dim=0)
-    combined.image = torch.stack(images, dim=0)
+    combined.image = torch.stack(images, dim=0)        # [B, 3, 224, 224]
+    combined.pe_bytes = torch.stack(pe_bytes_list, dim=0)    # [B, 1, 1024]
+    combined.api_tokens = torch.stack(api_tokens_list, dim=0)  # [B, max_apis]
 
     if edge_indices:
         combined.edge_index = torch.cat(edge_indices, dim=1)

@@ -208,10 +208,11 @@ def cmd_train(args):
     
     logger.info(f"Train: {len(train_indices)}, Val: {len(val_indices)}, Test: {len(test_indices)} (stratified)")
     
-    # Create joint model components
+    # Create quad-modal joint model components
     from ..model.joint_model import LoraLevitFeatureExtractor, BayesianClassifier, JointMalwareModel
+    from ..model.ransomformer import RansomFormerEncoder
     from ..model.joint_trainer import JointTrainer
-    
+
     hgt_model = HeterogeneousGraphTransformer(
         input_dim=model_config.embedding_dim,
         hidden_dim=model_config.hidden_dim,
@@ -219,15 +220,17 @@ def cmd_train(args):
         num_heads=model_config.num_heads,
         num_classes=model_config.num_classes
     )
-    
+
     levit_extractor = LoraLevitFeatureExtractor()
-    
+    ransomformer    = RansomFormerEncoder()
+
+    # Fused dim: HGT(512) + LeViT(384) + RansomFormer(256) = 1152
     bnn_classifier = BayesianClassifier(
-        in_features=model_config.hidden_dim * 2 + 384,
+        in_features=model_config.hidden_dim * 2 + 384 + 256,
         num_classes=model_config.num_classes
     )
-    
-    model = JointMalwareModel(hgt_model, levit_extractor, bnn_classifier)
+
+    model = JointMalwareModel(hgt_model, levit_extractor, ransomformer, bnn_classifier)
     
     # Train
     trainer = JointTrainer(model, train_config)
@@ -250,14 +253,16 @@ def cmd_train(args):
 
 
 def cmd_predict(args):
-    """Run prediction on a file using the multimodal joint model with BNN uncertainty sampling."""
+    """Run prediction using the quad-modal joint model (HGT+LeViT+RansomFormer+BNN)."""
     import torch
     import torchvision.transforms as transforms
     from .processor import FileProcessor
     from ..model.hgt import HeterogeneousGraphTransformer
     from ..model.joint_model import LoraLevitFeatureExtractor, BayesianClassifier, JointMalwareModel
+    from ..model.ransomformer import RansomFormerEncoder
     from ..model.dataset import CPGDataset, collate_cpg_batch
     from ..extraction.image_generator import pe_to_grayscale_image
+    from ..extraction.pe_feature_extractor import extract_ransomformer_features
     from ..config import UIRConfig
     
     model_path = Path(args.model)
@@ -278,16 +283,27 @@ def cmd_predict(args):
         num_classes=config.model.num_classes
     )
     levit_extractor = LoraLevitFeatureExtractor()
-    bnn_classifier = BayesianClassifier(
-        in_features=config.model.hidden_dim * 2 + 384,
+    ransomformer    = RansomFormerEncoder()
+    bnn_classifier  = BayesianClassifier(
+        in_features=config.model.hidden_dim * 2 + 384 + 256,  # 512+384+256 = 1152
         num_classes=config.model.num_classes
     )
-    model = JointMalwareModel(hgt_model, levit_extractor, bnn_classifier)
+    model = JointMalwareModel(hgt_model, levit_extractor, ransomformer, bnn_classifier)
     
     # Load model checkpoint
     logger.info(f"Loading joint model checkpoint from {model_path}")
     checkpoint = torch.load(model_path, map_location='cpu')
-    model.load_state_dict(checkpoint['model_state'])
+    
+    # Auto-detect if checkpoint was trained using fallback CNN or LeViT LoRA
+    checkpoint_keys = checkpoint['model_state'].keys()
+    has_fallback = any(k.startswith('levit.fallback_conv') for k in checkpoint_keys)
+    has_peft = any('lora_' in k for k in checkpoint_keys)
+    
+    if has_fallback and not has_peft:
+        logger.info("Checkpoint matches Fallback CNN mode. Toggling fallback in LeViT extractor.")
+        model.levit.is_fallback = True
+        
+    model.load_state_dict(checkpoint['model_state'], strict=False)
     model.eval()
     
     # Process single file (CPG extraction)
@@ -306,21 +322,35 @@ def cmd_predict(args):
     # Generate and load corresponding grayscale image
     logger.info(f"Generating grayscale image representation...")
     img = pe_to_grayscale_image(input_path, target_size=224)
+    # Convert single-channel 'L' grayscale to 3-channel 'RGB' so that
+    # transforms.ToTensor() produces shape [3, 224, 224] as expected by
+    # the ImageNet-normalisation stats and the LeViT/CNN feature extractor.
+    img = img.convert('RGB')
     img_transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     data.image = img_transform(img)
+
+    # ── RansomFormer inputs: sliding-window bytes + API tokens ────────────────
+    logger.info("Extracting PE byte sequence and API import tokens...")
+    api_names = list(cpg.metadata.get('imports', [])) if cpg.metadata else []
+    pe_bytes_tensor, api_tokens_tensor = extract_ransomformer_features(
+        input_path, api_names=api_names
+    )
+    data.pe_bytes   = pe_bytes_tensor    # [1, 1024]
+    data.api_tokens = api_tokens_tensor  # [max_apis]
     
     # Collate single element into a batch
     batch_data, batch_idx = collate_cpg_batch([data])
     
     # Run BNN inference with Monte Carlo sampling (T = 20)
-    logger.info("Running Bayesian Neural Network Monte Carlo sampling...")
+    logger.info("Running Bayesian Neural Network Monte Carlo sampling (quad-modal)...")
     preds, confidence, variance = model.predict_with_confidence(
         batch_data.x, batch_data.edge_index,
         batch_data.node_types, batch_data.edge_types,
         batch_idx, batch_data.image,
+        batch_data.pe_bytes, batch_data.api_tokens,
         num_samples=20
     )
     
@@ -329,14 +359,14 @@ def cmd_predict(args):
     epistemic_var = variance[0].item()
     
     label_map = {0: "BENIGN", 1: "MALWARE"}
-    print("\n" + "=" * 60)
-    print("      JOINT MULTIMODAL MALWARE DETECTION PREDICTION")
-    print("=" * 60)
+    print("\n" + "=" * 62)
+    print("   QUAD-MODAL MALWARE DETECTION  (HGT+LeViT+RansomFormer+BNN)")
+    print("=" * 62)
     print(f"  Target File:       {input_path.name}")
     print(f"  Malware Detection: {label_map.get(pred_class, 'UNKNOWN')}")
     print(f"  Confidence Level:  {conf_score * 100:.2f}%")
     print(f"  Epistemic Var:     {epistemic_var:.6f}")
-    print("=" * 60 + "\n")
+    print("=" * 62 + "\n")
     
     return 0
 

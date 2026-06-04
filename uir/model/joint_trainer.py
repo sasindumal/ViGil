@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 class JointTrainer:
-    """Trainer for the Joint HGT + LeViT + BNN classifier model."""
+    """Trainer for the Quad-Modal Joint Model: HGT + LeViT + RansomFormer + BNN."""
     
     def __init__(self, 
                  model: JointMalwareModel,
@@ -131,17 +131,18 @@ class JointTrainer:
                         batch_data.x, batch_data.edge_index,
                         batch_data.node_types, batch_data.edge_types,
                         batch_idx, batch_data.image,
+                        batch_data.pe_bytes, batch_data.api_tokens,
                         sample=True
                     )
                     labels = batch_data.y.squeeze()
-                    
+
                     # Classification Loss (Cross Entropy or Focal)
                     class_loss = self.classification_loss(logits, labels)
-                    
+
                     # Bayesian Neural Network KL Divergence regularization term
                     kl_div = self.model.bnn.kl_divergence()
                     loss = class_loss + self.kl_weight * kl_div
-                    
+
                 scaler.scale(loss).backward()
                 scaler.unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
@@ -152,14 +153,15 @@ class JointTrainer:
                     batch_data.x, batch_data.edge_index,
                     batch_data.node_types, batch_data.edge_types,
                     batch_idx, batch_data.image,
+                    batch_data.pe_bytes, batch_data.api_tokens,
                     sample=True
                 )
                 labels = batch_data.y.squeeze()
-                
+
                 class_loss = self.classification_loss(logits, labels)
                 kl_div = self.model.bnn.kl_divergence()
                 loss = class_loss + self.kl_weight * kl_div
-                
+
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 self.optimizer.step()
@@ -213,6 +215,7 @@ class JointTrainer:
                     batch_data.x, batch_data.edge_index,
                     batch_data.node_types, batch_data.edge_types,
                     batch_idx, batch_data.image,
+                    batch_data.pe_bytes, batch_data.api_tokens,
                     sample=False
                 )
                 
