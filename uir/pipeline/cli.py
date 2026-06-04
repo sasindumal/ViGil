@@ -163,9 +163,17 @@ def cmd_train(args):
         'checkpoint_dir': checkpoint_dir
     })
     
-    # Create dataset
-    logger.info(f"Loading dataset from: {data_dir}")
-    dataset = CPGDataset(data_dir, embedding_dim=model_config.embedding_dim)
+    # ── Auto-detect dataset type ──────────────────────────────────────────────
+    # If .feat.pt files exist → use fast PreExtractedDataset (no CPG parsing)
+    # Otherwise fall back to CPGDataset (reads .cpg.json files)
+    from ..model.dataset import CPGDataset, PreExtractedDataset
+    feat_files = list(data_dir.rglob("*.feat.pt"))
+    if feat_files:
+        logger.info(f"Found {len(feat_files)} .feat.pt files — using PreExtractedDataset")
+        dataset = PreExtractedDataset(data_dir)
+    else:
+        logger.info("No .feat.pt files found — using CPGDataset (reads .cpg.json)")
+        dataset = CPGDataset(data_dir, embedding_dim=model_config.embedding_dim)
     logger.info(f"Dataset size: {len(dataset)}")
     
     # Get labels for stratified split
@@ -209,28 +217,28 @@ def cmd_train(args):
     logger.info(f"Train: {len(train_indices)}, Val: {len(val_indices)}, Test: {len(test_indices)} (stratified)")
     
     # Create quad-modal joint model components
-    from ..model.joint_model import LoraLevitFeatureExtractor, BayesianClassifier, JointMalwareModel
+    from ..model.joint_model import BayesianClassifier, JointMalwareModel
+    from ..model.resnet_extractor import ResNetFeatureExtractor
     from ..model.ransomformer import RansomFormerEncoder
     from ..model.joint_trainer import JointTrainer
 
-    hgt_model = HeterogeneousGraphTransformer(
+    hgt_model    = HeterogeneousGraphTransformer(
         input_dim=model_config.embedding_dim,
         hidden_dim=model_config.hidden_dim,
         num_layers=model_config.num_layers,
         num_heads=model_config.num_heads,
         num_classes=model_config.num_classes
     )
+    resnet_extractor = ResNetFeatureExtractor(pretrained=True)
+    ransomformer     = RansomFormerEncoder()
 
-    levit_extractor = LoraLevitFeatureExtractor()
-    ransomformer    = RansomFormerEncoder()
-
-    # Fused dim: HGT(512) + LeViT(384) + RansomFormer(256) = 1152
+    # Fused dim: HGT(512) + ResNet(384) + RansomFormer(256) = 1152
     bnn_classifier = BayesianClassifier(
         in_features=model_config.hidden_dim * 2 + 384 + 256,
         num_classes=model_config.num_classes
     )
 
-    model = JointMalwareModel(hgt_model, levit_extractor, ransomformer, bnn_classifier)
+    model = JointMalwareModel(hgt_model, resnet_extractor, ransomformer, bnn_classifier)
     
     # Train
     trainer = JointTrainer(model, train_config)
@@ -253,12 +261,13 @@ def cmd_train(args):
 
 
 def cmd_predict(args):
-    """Run prediction using the quad-modal joint model (HGT+LeViT+RansomFormer+BNN)."""
+    """Run prediction using the quad-modal joint model (HGT+ResNet+RansomFormer+BNN)."""
     import torch
     import torchvision.transforms as transforms
     from .processor import FileProcessor
     from ..model.hgt import HeterogeneousGraphTransformer
-    from ..model.joint_model import LoraLevitFeatureExtractor, BayesianClassifier, JointMalwareModel
+    from ..model.joint_model import BayesianClassifier, JointMalwareModel
+    from ..model.resnet_extractor import ResNetFeatureExtractor
     from ..model.ransomformer import RansomFormerEncoder
     from ..model.dataset import CPGDataset, collate_cpg_batch
     from ..extraction.image_generator import pe_to_grayscale_image
@@ -282,13 +291,13 @@ def cmd_predict(args):
         num_heads=config.model.num_heads,
         num_classes=config.model.num_classes
     )
-    levit_extractor = LoraLevitFeatureExtractor()
-    ransomformer    = RansomFormerEncoder()
-    bnn_classifier  = BayesianClassifier(
+    resnet_extractor = ResNetFeatureExtractor(pretrained=False)  # weights loaded from checkpoint
+    ransomformer     = RansomFormerEncoder()
+    bnn_classifier   = BayesianClassifier(
         in_features=config.model.hidden_dim * 2 + 384 + 256,  # 512+384+256 = 1152
         num_classes=config.model.num_classes
     )
-    model = JointMalwareModel(hgt_model, levit_extractor, ransomformer, bnn_classifier)
+    model = JointMalwareModel(hgt_model, resnet_extractor, ransomformer, bnn_classifier)
     
     # Load model checkpoint
     logger.info(f"Loading joint model checkpoint from {model_path}")
@@ -360,7 +369,7 @@ def cmd_predict(args):
     
     label_map = {0: "BENIGN", 1: "MALWARE"}
     print("\n" + "=" * 62)
-    print("   QUAD-MODAL MALWARE DETECTION  (HGT+LeViT+RansomFormer+BNN)")
+    print("   QUAD-MODAL MALWARE DETECTION  (HGT+ResNet+RansomFormer+BNN)")
     print("=" * 62)
     print(f"  Target File:       {input_path.name}")
     print(f"  Malware Detection: {label_map.get(pred_class, 'UNKNOWN')}")
@@ -370,6 +379,21 @@ def cmd_predict(args):
     
     return 0
 
+def cmd_export_zip(args):
+    """Package trained models and standalone predictor into a deployment ZIP."""
+    from pathlib import Path as _P
+    checkpoint = _P(args.checkpoint)
+    output_zip = _P(args.output) if args.output else _P("vigil_deploy.zip")
+    # Delegate to export_zip script at project root
+    import sys, importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "export_zip",
+        _P(__file__).resolve().parent.parent.parent / "export_zip.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.create_deploy_zip(checkpoint, output_zip)
+    return 0
 
 
 def main():
@@ -424,8 +448,13 @@ def main():
     predict_parser.add_argument('--model', '-m', required=True, help='Model checkpoint')
     predict_parser.add_argument('--input', '-i', required=True, help='Input file')
     
+    # Export-zip command
+    export_parser = subparsers.add_parser('export-zip', help='Package models into a deployment ZIP')
+    export_parser.add_argument('--checkpoint', '-c', required=True, help='Path to best_joint_model_*.pt')
+    export_parser.add_argument('--output', '-o', default='vigil_deploy.zip', help='Output ZIP path')
+
     args = parser.parse_args()
-    
+
     if args.command == 'process':
         return cmd_process(args)
     elif args.command == 'batch':
@@ -434,6 +463,8 @@ def main():
         return cmd_train(args)
     elif args.command == 'predict':
         return cmd_predict(args)
+    elif args.command == 'export-zip':
+        return cmd_export_zip(args)
     else:
         parser.print_help()
         return 0

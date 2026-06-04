@@ -1,21 +1,17 @@
 """
-Joint Multimodal Malware Detection Model  (Quad-Modal)
+Joint Quad-Modal Malware Detection Model
 
-Combines four complementary representations of a PE binary:
-  1. CPG Graph         → HeterogeneousGraphTransformer (HGT)          → 512-dim
-  2. Grayscale Image   → LeViT-128S + LoRA                            → 384-dim
-  3. PE Byte Sequence  → RansomFormer ByteEncoder (1D CNN)            ┐
-  4. API Import Names  → RansomFormer APIEncoder (Transformer)        ┘ → 256-dim
+Four complementary representations of a PE binary:
+  1. CPG Graph         → HeterogeneousGraphTransformer (HGT)        → 512-dim
+  2. Grayscale Image   → ResNet-50 (pretrained, fine-tune layer4)   → 384-dim
+  3. PE Byte Sequence  → RansomFormer ByteEncoder (1D CNN)          ┐
+  4. API Import Names  → RansomFormer APIEncoder (Transformer)      ┘ → 256-dim
                          Cross-Modal Attention (bytes ↔ API)
 
-Fused embedding: 512 + 384 + 256 = 1152-dim
-Final classification: Bayesian Neural Network (BNN) with Monte Carlo
-uncertainty estimation, returning predictions + confidence + epistemic variance.
+Fused embedding: 512 + 384 + 256 = 1152-dim → BNN → prediction + confidence
 
-Paper reference for RansomFormer components:
-  "RansomFormer: A Cross-Modal Transformer Architecture for Ransomware
-   Detection via the Fusion of Byte and API Features"
-  Electronics 14(7):1245, 2025.  DOI: 10.3390/electronics14071245
+References:
+  - RansomFormer: Electronics 14(7):1245, 2025. DOI: 10.3390/electronics14071245
 """
 
 import torch
@@ -27,81 +23,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 1.  LeViT-128S + LoRA  (image stream)
-# ─────────────────────────────────────────────────────────────────────────────
-
-class LoraLevitFeatureExtractor(nn.Module):
-    """
-    Feature extractor utilizing facebook/levit-128S pretrained model.
-    Includes PEFT LoRA tuning for parameter efficiency and high accuracy.
-    Includes a fallback CNN model for offline/local standalone robustness.
-    """
-
-    def __init__(self, pretrained_model_name: str = None, lora_r: int = 8,
-                 lora_alpha: int = 16, force_fallback: bool = False):
-        super().__init__()
-        self.is_fallback = force_fallback
-
-        # ── Resolve local model path ──────────────────────────────────────────
-        # joint_model.py lives at  uir/model/joint_model.py → project root is 2 up
-        from pathlib import Path as _Path
-        _here = _Path(__file__).resolve().parent          # uir/model/
-        _project_root = _here.parent.parent               # project root
-        _local_levit = _project_root / "levit-128S"
-
-        if pretrained_model_name is None:
-            if _local_levit.exists():
-                pretrained_model_name = str(_local_levit)
-                logger.info(f"Using local LeViT model at: {pretrained_model_name}")
-            else:
-                pretrained_model_name = "facebook/levit-128S"
-                logger.info(f"Local folder not found, using HuggingFace ID: {pretrained_model_name}")
-
-        # Fallback CNN always initialised for robustness (outputs identical 384-dim)
-        self.fallback_conv = nn.Sequential(
-            nn.Conv2d(3, 16, 3, padding=1), nn.BatchNorm2d(16), nn.GELU(), nn.MaxPool2d(2),
-            nn.Conv2d(16, 32, 3, padding=1), nn.BatchNorm2d(32), nn.GELU(), nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, 3, padding=1), nn.BatchNorm2d(64), nn.GELU(), nn.MaxPool2d(2),
-            nn.Conv2d(64, 128, 3, padding=1), nn.BatchNorm2d(128), nn.GELU(),
-            nn.AdaptiveAvgPool2d((1, 1))
-        )
-        self.fallback_fc = nn.Linear(128, 384)
-
-        if not force_fallback:
-            try:
-                from transformers import LevitModel
-                from peft import LoraConfig, get_peft_model
-
-                logger.info(f"Loading LeViT model from: {pretrained_model_name}")
-                base_model = LevitModel.from_pretrained(
-                    pretrained_model_name, local_files_only=_local_levit.exists()
-                )
-                peft_config = LoraConfig(
-                    r=lora_r,
-                    lora_alpha=lora_alpha,
-                    target_modules=["queries_keys_values.linear", "projection.linear",
-                                    "linear_up.linear", "linear_down.linear"],
-                    lora_dropout=0.1,
-                    bias="none",
-                )
-                self.model = get_peft_model(base_model, peft_config)
-                logger.info("Successfully loaded LeViT model with PEFT LoRA")
-            except Exception as e:
-                logger.warning(f"Could not load LeViT model ({e}). Falling back to CNN.")
-                self.is_fallback = True
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: [B, 3, 224, 224]
-        if self.is_fallback:
-            features = self.fallback_conv(x).squeeze(-1).squeeze(-1)
-            return self.fallback_fc(features)
-        outputs = self.model(x)
-        return outputs.last_hidden_state.mean(dim=1)   # [B, 384]
-
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2.  Bayesian Neural Network  (classification head)
+# Bayesian Neural Network (classification head)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class BayesianLinear(nn.Module):
@@ -129,12 +53,12 @@ class BayesianLinear(nn.Module):
 
     def forward(self, x: torch.Tensor, sample: bool = True) -> torch.Tensor:
         if self.training or sample:
-            weight_sigma  = torch.log1p(torch.exp(self.weight_rho))
-            weight        = self.weight_mu + weight_sigma * torch.randn_like(self.weight_mu)
-            bias_sigma    = torch.log1p(torch.exp(self.bias_rho))
-            bias          = self.bias_mu + bias_sigma * torch.randn_like(self.bias_mu)
+            weight_sigma = torch.log1p(torch.exp(self.weight_rho))
+            weight       = self.weight_mu + weight_sigma * torch.randn_like(self.weight_mu)
+            bias_sigma   = torch.log1p(torch.exp(self.bias_rho))
+            bias         = self.bias_mu + bias_sigma * torch.randn_like(self.bias_mu)
         else:
-            weight, bias  = self.weight_mu, self.bias_mu
+            weight, bias = self.weight_mu, self.bias_mu
         return F.linear(x, weight, bias)
 
     def kl_divergence(self) -> torch.Tensor:
@@ -148,10 +72,7 @@ class BayesianLinear(nn.Module):
 
 
 class BayesianClassifier(nn.Module):
-    """
-    Two-layer BNN classifier.
-    Paper-matched hidden structure: in → 512 → 256 → num_classes  (classifier paper spec).
-    """
+    """Two-layer BNN classification head."""
 
     def __init__(self, in_features: int, num_classes: int = 2,
                  hidden_dim: int = 256, prior_sigma: float = 0.1):
@@ -168,7 +89,7 @@ class BayesianClassifier(nn.Module):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3.  Quad-Modal Joint Model
+# Quad-Modal Joint Model
 # ─────────────────────────────────────────────────────────────────────────────
 
 class JointMalwareModel(nn.Module):
@@ -177,7 +98,7 @@ class JointMalwareModel(nn.Module):
 
     Streams:
       hgt          — HGT over CPG graph                   → [B, 512]
-      levit        — LeViT-128S + LoRA over grayscale img → [B, 384]
+      resnet       — ResNet-50 over grayscale image        → [B, 384]
       ransomformer — RansomFormer (bytes + API imports)   → [B, 256]
 
     Fused dim: 512 + 384 + 256 = 1152  → BNN → [B, num_classes]
@@ -185,12 +106,12 @@ class JointMalwareModel(nn.Module):
 
     def __init__(self,
                  hgt_model: nn.Module,
-                 levit_model: nn.Module,
+                 resnet_model: nn.Module,
                  ransomformer_model: nn.Module,
                  bnn_classifier: nn.Module):
         super().__init__()
         self.hgt          = hgt_model
-        self.levit        = levit_model
+        self.resnet       = resnet_model
         self.ransomformer = ransomformer_model
         self.bnn          = bnn_classifier
 
@@ -207,11 +128,11 @@ class JointMalwareModel(nn.Module):
         """
         Args:
             x:           Node features          [N, in_dim]
-            edge_index:  Graph edge indices      [2, E]
+            edge_index:  Graph edges             [2, E]
             node_types:  Node type IDs           [N]
             edge_types:  Edge type IDs           [E]
             batch_idx:   Batch index per node    [N]
-            images:      Grayscale images        [B, 3, 224, 224]
+            images:      RGB grayscale images    [B, 3, 224, 224]
             pe_bytes:    Byte sequences          [B, 1, 1024]
             api_tokens:  API import token IDs   [B, max_apis]
             sample:      Whether to sample BNN weights
@@ -219,19 +140,19 @@ class JointMalwareModel(nn.Module):
         Returns:
             logits  [B, num_classes]
         """
-        # ── Stream 1: CPG graph → HGT ─────────────────────────────────────────
+        # Stream 1: CPG graph → HGT
         graph_embeds = self.hgt.get_graph_embedding(
             x, edge_index, node_types, edge_types, batch_idx)          # [B, 512]
 
-        # ── Stream 2: Grayscale image → LeViT + LoRA ─────────────────────────
-        image_embeds = self.levit(images)                               # [B, 384]
+        # Stream 2: Grayscale image → ResNet-50
+        image_embeds = self.resnet(images)                             # [B, 384]
 
-        # ── Stream 3: PE bytes + API imports → RansomFormer ──────────────────
-        ransomformer_embeds = self.ransomformer(pe_bytes, api_tokens)   # [B, 256]
+        # Stream 3: PE bytes + API imports → RansomFormer
+        ransomformer_embeds = self.ransomformer(pe_bytes, api_tokens)  # [B, 256]
 
-        # ── Fusion & classification ───────────────────────────────────────────
+        # Fusion & BNN classification
         fused  = torch.cat([graph_embeds, image_embeds, ransomformer_embeds], dim=-1)  # [B, 1152]
-        logits = self.bnn(fused, sample=sample)                         # [B, num_classes]
+        logits = self.bnn(fused, sample=sample)
         return logits
 
     @torch.no_grad()
@@ -247,7 +168,7 @@ class JointMalwareModel(nn.Module):
                                 num_samples: int = 20
                                 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Monte Carlo BNN inference — runs num_samples stochastic forward passes.
+        Monte Carlo BNN inference.
 
         Returns:
             preds:      Class predictions (0=benign, 1=malware)  [B]
@@ -262,12 +183,12 @@ class JointMalwareModel(nn.Module):
                                   sample=True)
             all_probs.append(torch.softmax(logits, dim=-1))
 
-        all_probs  = torch.stack(all_probs, dim=0)          # [T, B, C]
-        mean_probs = all_probs.mean(dim=0)                  # [B, C]
-        preds      = mean_probs.argmax(dim=-1)              # [B]
+        all_probs  = torch.stack(all_probs, dim=0)   # [T, B, C]
+        mean_probs = all_probs.mean(dim=0)            # [B, C]
+        preds      = mean_probs.argmax(dim=-1)        # [B]
         confidence = mean_probs[torch.arange(preds.size(0)), preds]
 
         chosen_probs = all_probs[:, torch.arange(preds.size(0)), preds]
-        variance     = chosen_probs.var(dim=0)              # [B]
+        variance     = chosen_probs.var(dim=0)        # [B]
 
         return preds, confidence, variance

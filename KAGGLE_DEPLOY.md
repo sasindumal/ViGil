@@ -1,76 +1,126 @@
-# 🚀 Deploy CPG Notebook to Kaggle
+# 🚀 ViGil — Kaggle Training Guide
 
-## Step 1: Create the Dataset
+## Overview
 
-**Zip your project files locally:**
+**New workflow** — no PE binaries needed on Kaggle:
+1. Extract features **locally** (Mac M4) → `.feat.pt` files
+2. Upload only `.feat.pt` files to Kaggle
+3. Train on Kaggle GPU
+4. Download `vigil_deploy.zip`
+
+---
+
+## Step 1: Extract Features Locally
+
+Run the batch processor on your Mac:
 
 ```bash
-cd /Users/sasindumalhara/Shared/CPG
-zip -r CPG_project.zip cpgs/ uir/ setup.py requirements.txt
+cd /Users/sasindumalhara/Workspace/ViGil
+
+python -m uir.pipeline.cli batch \
+    --input-dir ./malware_dataset \
+    --output-dir ./output/ \
+    --device-profile m4
 ```
 
-1. Go to [kaggle.com/datasets](https://www.kaggle.com/datasets) → **New Dataset**
-2. Upload `CPG_project.zip`, name it **`cpg-malware-dataset`**
-3. Wait for processing to complete
+This generates three files per PE binary:
+```
+output/
+  benigns/
+    sample_a.cpg.json    ← Code Property Graph
+    sample_a.png         ← Grayscale image
+    sample_a.feat.pt     ← ✅ All 4 modality tensors (for Kaggle)
+  malwares/
+    sample_x.feat.pt     ← ✅ Upload this
+```
 
-> Your files will be at `/kaggle/input/cpg-malware-dataset/`
+**Only the `.feat.pt` files are needed for Kaggle training.**
 
 ---
 
-## Step 2: Create Kaggle Notebook
+## Step 2: Upload Feature Files to Kaggle
+
+1. Zip only the `.feat.pt` files:
+```bash
+cd /Users/sasindumalhara/Workspace/ViGil
+zip -r vigil_features.zip output/**/*.feat.pt
+```
+
+2. Go to [kaggle.com/datasets](https://www.kaggle.com/datasets) → **New Dataset**
+3. Upload `vigil_features.zip`, name it **`vigil-features`**
+4. Wait for processing to complete
+
+> Your files will be at `/kaggle/input/vigil-features/`
+
+---
+
+## Step 3: Upload Source Code (Optional)
+
+If you want to use the uir package on Kaggle:
+```bash
+zip -r vigil_src.zip uir/ predict.py export_zip.py setup.py
+```
+Upload as dataset **`vigil-src`** → available at `/kaggle/input/vigil-src/`
+
+---
+
+## Step 4: Create Kaggle Notebook
 
 1. Go to [kaggle.com/code](https://www.kaggle.com/code) → **New Notebook**
-2. Click **Add Data** (right sidebar) → search **`cpg-malware-dataset`** → **Add**
-3. Set **Accelerator → GPU T4 x2** (or GPU P100)
-4. Enable **Internet** in Settings (needed for `pip install`)
+2. **Import notebook**: Upload `vigil_kaggle.ipynb` (in project root)
+3. Click **Add Data** → add your **`vigil-features`** dataset
+4. Set **Accelerator → GPU T4 x2** (or P100)
+5. Enable **Internet** in Settings (for `pip install pydantic`)
 
 ---
 
-## Step 3: Add Setup Cell (First Cell)
+## Step 5: Configure Notebook Paths
 
-Add this as the **very first code cell** before all other cells:
-
+In **Cell 1**, update the dataset name if you used a different name:
 ```python
-import os, sys, shutil
-
-# Copy project files to a writable directory (Kaggle input is read-only)
-INPUT_DIR = '/kaggle/input/cpg-malware-dataset'
-WORK_DIR  = '/kaggle/working/CPG'
-
-if not os.path.exists(WORK_DIR):
-    shutil.copytree(INPUT_DIR, WORK_DIR)
-
-os.chdir(WORK_DIR)
-sys.path.insert(0, WORK_DIR)
-
-# Install missing dependencies
-!pip install -q pydantic pylnk3
-
-print(f"Working directory: {os.getcwd()}")
-print(f"Files: {os.listdir('.')}")
+INPUT_DIR = Path('/kaggle/input/vigil-features')   # ← your dataset slug
 ```
 
 ---
 
-## Step 4: Update Paths in Configuration Cell
+## Step 6: Run & Download
 
-In **Section 2 (Configuration)**, change the paths:
-
-```python
-CPG_DIR        = Path('/kaggle/working/CPG/cpgs')
-CHECKPOINT_DIR = Path('/kaggle/working/checkpoints')
-```
-
-Everything else stays the same.
+1. Click **Run All**
+2. Training runs for 50 epochs (~3–5h on T4 GPU)
+3. After completion, go to **Output** tab
+4. Download **`vigil_deploy.zip`**
 
 ---
 
-## Step 5: Run & Download
+## Step 7: Use vigil_deploy.zip for Prediction
 
-1. Click **Run All** or run cells sequentially
-2. After training, outputs appear in the **Output** tab
-3. Download `best_model.pt` and `final_model.pt` from there
-4. Or click **Save Version** to create a reusable Kaggle dataset
+```bash
+unzip vigil_deploy.zip
+
+python vigil_deploy/predict.py \
+    --model  vigil_deploy/models/joint_model.pt \
+    --file   suspicious.exe
+
+# Output:
+# ================================================================
+#    QUAD-MODAL MALWARE DETECTION  (HGT+ResNet+RansomFormer+BNN)
+# ================================================================
+#   File:        suspicious.exe
+#   Prediction:  MALWARE
+#   Confidence:  94.23%
+#   Uncertainty: 0.000412
+# ================================================================
+```
+
+---
+
+## Step 8: Or Export ZIP Locally (After Local Training)
+
+```bash
+python -m uir.pipeline.cli export-zip \
+    --checkpoint checkpoints/best_joint_model_*.pt \
+    --output vigil_deploy.zip
+```
 
 ---
 
@@ -78,9 +128,29 @@ Everything else stays the same.
 
 | Item | Detail |
 |------|--------|
-| **GPU** | Always enable — HGT on CPU is very slow |
-| **Read-only input** | That's why we copy to `/kaggle/working/` |
-| **Pre-installed** | `torch`, `numpy`, `sklearn`, `matplotlib`, `seaborn` |
-| **Need to install** | `pydantic`, `pylnk3` |
+| **GPU** | T4 x2 or P100 — always enable |
+| **Upload size** | ~30–100 MB for `.feat.pt` files (not GBs of PE files) |
+| **Training time** | ~3–5h (50 epochs, 9,499 samples, T4) |
+| **Pre-installed** | `torch`, `torchvision`, `numpy`, `sklearn`, `matplotlib`, `seaborn` |
+| **Need to install** | `pydantic`, `tqdm` |
 | **Session limit** | ~12h GPU / ~9h with internet |
-| **Notebook features** | Train/Val/Test split, Early Stopping, LR Scheduler, Best Weights Restore |
+| **Output** | `vigil_deploy.zip` — self-contained, ~50–200MB |
+
+## Architecture
+
+```
+PE Binary
+ ├─ CPG Graph     → HGT (4 layers, 8 heads)     → [B, 512]  ─┐
+ ├─ Grayscale PNG → ResNet-50 (layer4 fine-tune) → [B, 384]  ─┤ → BNN → Prediction
+ └─ Raw Bytes     → RansomFormer 1D CNN          → [B, 256]  ─┘   + Confidence
+    └─ API Imports   └─ Transformer (8L × 8H)                       + Uncertainty
+                        └─ Cross-Modal Attention
+```
+
+| Stream | Encoder | Output |
+|--------|---------|--------|
+| CPG Graph | HGT Transformer | 512-dim |
+| Grayscale Image | ResNet-50 (pretrained) | 384-dim |
+| PE Bytes | 1D CNN (64→128 filters) | 256-dim |
+| API Imports | Transformer (8L, 8H, 256-dim) | merged with bytes |
+| **Fusion** | Concat → BNN (MC sampling) | 2-class + confidence |

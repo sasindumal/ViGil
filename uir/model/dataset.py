@@ -863,3 +863,57 @@ def collate_cpg_batch(batch: List[CPGData]) -> Tuple[CPGData, torch.Tensor]:
     batch_tensor = torch.cat(batches, dim=0)
     return combined, batch_tensor
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PreExtractedDataset — loads .feat.pt files (for Kaggle training)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class PreExtractedDataset(Dataset):
+    """
+    Dataset that loads pre-extracted .feat.pt files saved by the batch processor.
+
+    Each .feat.pt contains all 4 modality tensors so Kaggle training never
+    needs the original PE binaries or CPG extraction code.
+
+    Expected file layout:
+        root/
+          benigns/   *.feat.pt   (label=0)
+          malwares/  *.feat.pt   (label=1)
+
+    Args:
+        feat_dir: Root directory containing the .feat.pt files.
+    """
+
+    def __init__(self, feat_dir: Path):
+        self.feat_dir = Path(feat_dir)
+        self.feat_files: List[Path] = sorted(self.feat_dir.rglob("*.feat.pt"))
+        logger.info(
+            f"PreExtractedDataset: found {len(self.feat_files)} .feat.pt files "
+            f"in {feat_dir}"
+        )
+
+    def __len__(self) -> int:
+        return len(self.feat_files)
+
+    def __getitem__(self, idx: int) -> CPGData:
+        path = self.feat_files[idx]
+        try:
+            feat = torch.load(path, map_location="cpu", weights_only=True)
+        except TypeError:
+            feat = torch.load(path, map_location="cpu")
+
+        data = CPGData()
+        data.x          = feat.get("x",          torch.zeros(1, 320))
+        data.edge_index = feat.get("edge_index",  torch.zeros(2, 0, dtype=torch.long))
+        data.node_types = feat.get("node_types",  torch.zeros(data.x.size(0), dtype=torch.long))
+        data.edge_types = feat.get("edge_types",  torch.zeros(0, dtype=torch.long))
+        data.image      = feat.get("image",       torch.zeros(3, 224, 224))
+        data.pe_bytes   = feat.get("pe_bytes",    torch.zeros(1, 1024))
+        data.api_tokens = feat.get("api_tokens",  torch.zeros(256, dtype=torch.long))
+        data.num_nodes  = data.x.size(0)
+        data.num_edges  = data.edge_index.size(1)
+        data.file_path  = str(path)
+
+        label  = feat.get("label", 0)
+        data.y = torch.tensor([int(label)], dtype=torch.long)
+        return data
