@@ -5,3 +5,6 @@
 /malware_dataset
 /checkpoints
 .DS_Store
+/output
+/uir/pipeline/__pycache__
+/levit-128S
