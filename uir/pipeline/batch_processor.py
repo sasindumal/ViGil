@@ -34,20 +34,18 @@ def _process_single_file(args: tuple) -> tuple:
     Worker function for processing a single file.
     Must be a top-level function for pickling in multiprocessing.
 
-    Outputs (per sample):
-      <stem>.cpg.json  — Code Property Graph
-      <stem>.png       — Grayscale binary visualisation
-      <stem>.feat.pt   — Pre-extracted feature tensors for Kaggle upload:
-                           x, edge_index, node_types, edge_types,
-                           image, pe_bytes, api_tokens, label, stem
+    Outputs (per sample, named by zero-padded index):
+      <index>.cpg.json  — Code Property Graph
+      <index>.png       — Grayscale binary visualisation
+      <index>.feat.pt   — Pre-extracted feature tensors (original name stored as 'stem')
 
     Args:
-        args: (file_path_str, output_dir_str, use_fast_serialization)
+        args: (file_path_str, output_dir_str, use_fast_serialization, file_index)
 
     Returns:
         (file_path_str, success: bool, error_msg: str or None, node_count: int)
     """
-    file_path_str, output_dir_str, use_fast_serialization = args
+    file_path_str, output_dir_str, use_fast_serialization, file_index = args
 
     try:
         from .processor import FileProcessor
@@ -77,9 +75,12 @@ def _process_single_file(args: tuple) -> tuple:
                 label   = 0
 
             sub_dir.mkdir(parents=True, exist_ok=True)
-            output_path       = sub_dir / f"{file_path.stem}.cpg.json"
-            image_output_path = sub_dir / f"{file_path.stem}.png"
-            feat_output_path  = sub_dir / f"{file_path.stem}.feat.pt"
+
+            # Use zero-padded numeric name (preserves original name in .feat.pt)
+            num_name          = f"{file_index:06d}"
+            output_path       = sub_dir / f"{num_name}.cpg.json"
+            image_output_path = sub_dir / f"{num_name}.png"
+            feat_output_path  = sub_dir / f"{num_name}.feat.pt"
 
             # ── 1. Save CPG ───────────────────────────────────────────────────
             if use_fast_serialization:
@@ -291,8 +292,8 @@ class BatchProcessor:
 
         output_dir_str = str(output_dir) if output_dir else None
         args_list = [
-            (str(f), output_dir_str, self._use_fast_serialization)
-            for f in files
+            (str(f), output_dir_str, self._use_fast_serialization, idx)
+            for idx, f in enumerate(files)
         ]
 
         with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
@@ -338,8 +339,8 @@ class BatchProcessor:
             batch_count += 1
 
             args_list = [
-                (str(f), output_dir_str, self._use_fast_serialization)
-                for f in batch
+                (str(f), output_dir_str, self._use_fast_serialization, batch_start + i)
+                for i, f in enumerate(batch)
             ]
 
             logger.debug(f"M4 batch {batch_count}: {len(batch)} files")
@@ -390,8 +391,8 @@ class BatchProcessor:
         # Combined here for simplicity with higher worker count
 
         args_list = [
-            (str(f), output_dir_str, self._use_fast_serialization)
-            for f in files
+            (str(f), output_dir_str, self._use_fast_serialization, idx)
+            for idx, f in enumerate(files)
         ]
 
         # Use more workers for GPU profile — I/O is bottleneck
