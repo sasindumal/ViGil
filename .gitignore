@@ -5,3 +5,5 @@
 /malware_dataset
 /checkpoints
 .DS_Store
+/cpg
+/cpgs_gtx
