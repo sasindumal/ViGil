@@ -18,6 +18,12 @@
     "ocsp.digicert.com0C": 1,
     "ocsp.digicert.com0H": 1,
     "ocsp.digicert.com0I": 1,
-    "ocsp.digicert.com0O": 1
+    "ocsp.digicert.com0O": 1,
+    "cevcsca2021.ocsp-certum.com07": 1,
+    "repository.certum.pl": 2,
+    "cevcsca2021.crl.certum.pl": 1,
+    "crl.certum.pl": 1,
+    "subca.ocsp-certum.com02": 1,
+    "www.certum.pl": 2
   }
 }
