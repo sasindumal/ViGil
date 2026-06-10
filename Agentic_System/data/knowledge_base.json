@@ -2,9 +2,9 @@
   "malware_families": {},
   "ttps": {},
   "evasion_techniques": {
-    "GetLastError": 2,
-    "SetUnhandledExceptionFilter": 1,
-    "IsDebuggerPresent": 1,
+    "GetLastError": 5,
+    "SetUnhandledExceptionFilter": 3,
+    "IsDebuggerPresent": 3,
     "OutputDebugStringW": 1
   },
   "behavioral_patterns": [],
@@ -24,6 +24,14 @@
     "cevcsca2021.crl.certum.pl": 1,
     "crl.certum.pl": 1,
     "subca.ocsp-certum.com02": 1,
-    "www.certum.pl": 2
+    "www.certum.pl": 2,
+    "xv.%s.com": 1,
+    "s.symcb.com": 1,
+    "ts-aia.ws.symantec.com": 1,
+    "ts-crl.ws.symantec.com": 1,
+    "nsis.sf.net": 1,
+    "s.symcd.com06": 1,
+    "ts-ocsp.ws.symantec.com0;": 1,
+    "d.symcb.com": 3
   }
 }

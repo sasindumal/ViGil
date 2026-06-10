@@ -251,11 +251,27 @@ class PEAnalysisCrew:
         confidence = 85.0
         risk_score = 75.0
 
+        report_upper = final_report.upper()
         model_output_text = agent_outputs.get(self.agent_model.role, "").upper()
-        if "BENIGN" in model_output_text:
+
+        if "VERDICT: MALWARE" in report_upper or "VERDICT**: MALWARE" in report_upper:
+            verdict = "MALWARE"
+        elif "VERDICT: BENIGN" in report_upper or "VERDICT**: BENIGN" in report_upper:
             verdict = "BENIGN"
             risk_score = 20.0
             confidence = 90.0
+        else:
+            # Fallback to model comparator output check
+            if "VERDICT: BENIGN" in model_output_text or "VERDICT**: BENIGN" in model_output_text:
+                verdict = "BENIGN"
+                risk_score = 20.0
+                confidence = 90.0
+            elif "VERDICT: MALWARE" in model_output_text or "VERDICT**: MALWARE" in model_output_text:
+                verdict = "MALWARE"
+            elif "BENIGN" in model_output_text and "MALWARE" not in model_output_text:
+                verdict = "BENIGN"
+                risk_score = 20.0
+                confidence = 90.0
 
         # Try to parse exact risk score and confidence from model output or final report
         try:
