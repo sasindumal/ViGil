@@ -87,28 +87,48 @@ Perform a comprehensive security analysis of this script:
 4. MITRE ATT&CK: Map all identified malicious behaviors to the MITRE ATT&CK framework.
 5. Executive Assessment: Calculate a risk score (0 to 100) and provide a final verdict ("MALWARE" or "BENIGN") with confidence (0 to 100).
 
-You must write a comprehensive, markdown-formatted final security report using this structure:
-## Executive Summary
-- **Verdict**: MALWARE (or BENIGN)
-- **Risk Score**: <score between 0 and 100>
-- **Confidence**: <confidence between 0 and 100>
+You must write a premium, modern, highly structured Markdown security report using this exact structure:
 
-## Script Overview
-- Language: <language>
-- Size: <file size>
-- Intent/Category: <category>
+# THREAT INTELLIGENCE & FORENSICS REPORT
 
-## Threat Classification & ATT&CK Mapping
-- Category: <Trojan/Stealer/Ransomware/etc.>
-- MITRE ATT&CK Techniques: <Technique names and IDs>
+## 1. Executive Summary
+> [!WARNING] (or [!NOTE] if benign, [!CAUTION] if high danger malware)
+> **VERDICT**: MALWARE (or BENIGN) | **RISK SCORE**: <score>/100 | **CONFIDENCE**: <confidence>%
+> 
+> *Write a 3-4 sentence high-level executive summary of the script's nature, suspicious actions detected, and threat impact.*
 
-## Detailed Findings
-- Obfuscation & Deobfuscation details
-- Behavioral findings
-- Network Indicators & IOCs
+## 2. File Metadata & Overview
+Use a Markdown table:
+| Property | Value |
+| --- | --- |
+| File Name | <filename> |
+| File Size | <size> |
+| Script Language | <e.g., PowerShell, JavaScript, Python> |
+| Intent Category | <e.g., Trojan, Ransomware, Stealer, Downloader, Suspicious, Benign> |
+| Danger Level | <Critical / High / Medium / Low / None> |
 
-## Recommendations
-<Your specific security recommendations>""",
+## 3. In-Depth Technical Analysis
+### A. Code Analysis & Deobfuscation
+Describe obfuscation techniques used (Base64, hex, XOR, string concatenation) and show deobfuscated payload snippets if found.
+
+### B. Suspicious Behaviors & Persistence
+Detail credential theft indicators, LOLBin abuse, registry updates, process injections, startup items, or scheduled tasks.
+
+### C. Network & C2 Indicators (IOCs)
+If none, state "No network indicators identified." Otherwise, use a Markdown table:
+| Indicator Type | Value | Classification / Reputation |
+| --- | --- | --- |
+| <IP / Domain / URL / Hostname> | <value> | <Malicious / Suspicious / Action Required> |
+
+## 4. MITRE ATT&CK Mapping
+Use a Markdown table:
+| Tactic | Technique ID | Technique Name | Evidence / Abuse Details |
+| --- | --- | --- | --- |
+| <Tactic name> | <e.g., T1059> | <Technique name> | <Specific script findings> |
+
+## 5. Defensive Recommendations & Mitigation
+List 3-4 actionable security recommendations or defensive measures.
+""",
             expected_output="A comprehensive script security analysis report in Markdown format with a final verdict (MALWARE or BENIGN), risk score (0-100), and confidence percentage.",
             agent=self.agent,
         )
@@ -181,11 +201,11 @@ You must write a comprehensive, markdown-formatted final security report using t
         risk_score = 20.0
 
         report_upper = final_report.upper()
-        if "VERDICT: MALWARE" in report_upper or "VERDICT**: MALWARE" in report_upper:
+        if "VERDICT: MALWARE" in report_upper or "VERDICT**: MALWARE" in report_upper or "VERDICT**: MALWARE" in report_upper:
             verdict = "MALWARE"
             risk_score = 75.0
             confidence = 85.0
-        elif "VERDICT: BENIGN" in report_upper or "VERDICT**: BENIGN" in report_upper:
+        elif "VERDICT: BENIGN" in report_upper or "VERDICT**: BENIGN" in report_upper or "VERDICT**: BENIGN" in report_upper:
             verdict = "BENIGN"
             risk_score = 15.0
             confidence = 90.0
@@ -196,10 +216,10 @@ You must write a comprehensive, markdown-formatted final security report using t
 
         # Extract risk score and confidence if explicitly mentioned
         try:
-            risk_match = re.search(r"RISK SCORE\s*:\s*\*?(\d+)", report_upper)
+            risk_match = re.search(r"RISK\s*SCORE\s*\*?[:*]*\s*(\d+)", report_upper)
             if risk_match:
                 risk_score = float(risk_match.group(1))
-            conf_match = re.search(r"CONFIDENCE\s*:\s*\*?(\d+)", report_upper)
+            conf_match = re.search(r"CONFIDENCE\s*\*?[:*]*\s*(\d+)", report_upper)
             if conf_match:
                 confidence = float(conf_match.group(1))
         except Exception:
