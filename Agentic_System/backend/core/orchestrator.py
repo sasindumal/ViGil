@@ -176,7 +176,6 @@ class AnalysisOrchestrator:
             pf_hash = self._compute_sha256(pf)
             # Run Deep PE Static Parser
             pe_json = await self.pe_analyzer.analyze(pf, self.emitter, analysis_id)
-            await self.emitter.emit(self.emitter._history[analysis_id][-1])  # Ensure latest progress sent
             
             # Run ML Model
             await self.emitter.emit_step(

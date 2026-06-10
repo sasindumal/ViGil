@@ -13,11 +13,12 @@ Configures and instantiates LangChain-compatible LLM providers for CrewAI:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any, Optional
 
-from langchain_core.language_models.chat_models import BaseChatModel
+from crewai import LLM
 
 # Config imports
 from backend.config import get_config
@@ -25,8 +26,8 @@ from backend.config import get_config
 logger = logging.getLogger("vigil.llm_config")
 
 
-def get_llm(provider_config: Optional[dict] = None) -> BaseChatModel:
-    """Return a LangChain-compatible chat model based on the active provider.
+def get_llm(provider_config: Optional[dict] = None) -> LLM:
+    """Return a CrewAI LLM instance based on the active provider.
 
     Parameters
     ----------
@@ -35,8 +36,8 @@ def get_llm(provider_config: Optional[dict] = None) -> BaseChatModel:
 
     Returns
     -------
-    BaseChatModel
-        LangChain chat model instance.
+    LLM
+        CrewAI LLM instance.
     """
     cfg = get_config()
     
@@ -49,81 +50,79 @@ def get_llm(provider_config: Optional[dict] = None) -> BaseChatModel:
 
     try:
         if active_provider == "openai":
-            from langchain_openai import ChatOpenAI
             opt = cfg.llm.openai
             key = provider_config.get("openai_api_key", opt.api_key) if provider_config else opt.api_key
             model = provider_config.get("openai_model", opt.model) if provider_config else opt.model
             base_url = provider_config.get("openai_base_url", opt.base_url) if provider_config else opt.base_url
             
-            return ChatOpenAI(
-                openai_api_key=key,
-                model=model,
+            model_name = model if "/" in model else f"openai/{model}"
+            return LLM(
+                model=model_name,
+                api_key=key,
                 base_url=base_url,
                 temperature=0.1,
             )
 
         elif active_provider == "gemini":
-            from langchain_google_genai import ChatGoogleGenerativeAI
             opt = cfg.llm.gemini
             key = provider_config.get("gemini_api_key", opt.api_key) if provider_config else opt.api_key
             model = provider_config.get("gemini_model", opt.model) if provider_config else opt.model
             
-            return ChatGoogleGenerativeAI(
-                google_api_key=key,
-                model=model,
+            model_name = model if "/" in model else f"gemini/{model}"
+            return LLM(
+                model=model_name,
+                api_key=key,
                 temperature=0.1,
             )
 
         elif active_provider == "ollama":
-            from langchain_openai import ChatOpenAI
             opt = cfg.llm.ollama
             base_url = provider_config.get("ollama_base_url", opt.base_url) if provider_config else opt.base_url
             model = provider_config.get("ollama_model", opt.model) if provider_config else opt.model
             
-            return ChatOpenAI(
-                openai_api_key="ollama",  # dummy
-                base_url=f"{base_url.rstrip('/')}/v1",
-                model=model,
+            model_name = model if "/" in model else f"ollama/{model}"
+            return LLM(
+                model=model_name,
+                base_url=base_url,
                 temperature=0.1,
             )
 
         elif active_provider == "nvidia_nim":
-            from langchain_openai import ChatOpenAI
             opt = cfg.llm.nvidia_nim
             key = provider_config.get("nvidia_api_key", opt.api_key) if provider_config else opt.api_key
             base_url = provider_config.get("nvidia_base_url", opt.base_url) if provider_config else opt.base_url
             model = provider_config.get("nvidia_model", opt.model) if provider_config else opt.model
             
-            return ChatOpenAI(
-                openai_api_key=key,
+            model_name = model if "/" in model else f"nvidia_nim/{model}"
+            return LLM(
+                model=model_name,
+                api_key=key,
                 base_url=base_url,
-                model=model,
                 temperature=0.1,
             )
 
         elif active_provider == "openrouter":
-            from langchain_openai import ChatOpenAI
             opt = cfg.llm.openrouter
             key = provider_config.get("openrouter_api_key", opt.api_key) if provider_config else opt.api_key
             model = provider_config.get("openrouter_model", opt.model) if provider_config else opt.model
             
-            return ChatOpenAI(
-                openai_api_key=key,
-                base_url="https://openrouter.ai/api/v1",
-                model=model,
+            model_name = model if "/" in model else f"openrouter/{model}"
+            return LLM(
+                model=model_name,
+                api_key=key,
                 temperature=0.1,
             )
 
         elif active_provider == "lmstudio":
-            from langchain_openai import ChatOpenAI
             opt = cfg.llm.lmstudio
             base_url = provider_config.get("lmstudio_base_url", opt.base_url) if provider_config else opt.base_url
             model = provider_config.get("lmstudio_model", opt.model) if provider_config else opt.model
             
-            return ChatOpenAI(
-                openai_api_key="lmstudio",  # dummy
+            model_name = model if "/" in model else f"openai/{model}"
+            return LLM(
+                model=model_name,
                 base_url=base_url,
-                model=model,
+                api_key="lmstudio",  # dummy
                 temperature=0.1,
             )
 
@@ -149,10 +148,10 @@ async def test_connection(provider_config: Optional[dict] = None) -> dict[str, A
         
         # Test with a simple prompt in executor to avoid blocking
         def run_test():
-            return llm.invoke("Respond with the word 'pong' and nothing else.")
+            return llm.call("Respond with the word 'pong' and nothing else.")
 
         response = await asyncio.get_event_loop().run_in_executor(None, run_test)
-        response_text = response.content.strip().lower() if hasattr(response, "content") else str(response).strip().lower()
+        response_text = response.strip().lower()
         
         elapsed_ms = int((time.perf_counter() - start_time) * 1000)
         

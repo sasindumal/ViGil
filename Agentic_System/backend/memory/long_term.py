@@ -22,6 +22,22 @@ from backend.config import get_config
 logger = logging.getLogger("vigil.memory.long_term")
 
 
+class SQLiteContextManager:
+    """Custom async context manager for aiosqlite connections to prevent thread reuse errors."""
+    def __init__(self, db_path: Path):
+        self.db_path = db_path
+        self.conn: Optional[aiosqlite.Connection] = None
+
+    async def __aenter__(self) -> aiosqlite.Connection:
+        self.conn = await aiosqlite.connect(self.db_path)
+        self.conn.row_factory = aiosqlite.Row
+        return self.conn
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.conn:
+            await self.conn.close()
+
+
 class LongTermMemory:
     """Async interface for SQLite-backed threat and analysis persistence."""
 
@@ -41,11 +57,9 @@ class LongTermMemory:
         # Ensure parent folder exists
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    async def _get_conn(self) -> aiosqlite.Connection:
-        """Return a connection to the SQLite database."""
-        conn = await aiosqlite.connect(self.db_path)
-        conn.row_factory = aiosqlite.Row
-        return conn
+    async def _get_conn(self) -> SQLiteContextManager:
+        """Return a connection context manager to the SQLite database."""
+        return SQLiteContextManager(self.db_path)
 
     async def init_db(self):
         """Create database tables if they do not exist."""
