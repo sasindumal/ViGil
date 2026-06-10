@@ -20,7 +20,7 @@ def create_agent(llm) -> Agent:
         tools=[pe_analyzer_tool],
         llm=llm,
         verbose=True,
-        memory=True,
+        memory=False,
     )
 
 def create_task(agent: Agent, context_data: dict) -> Task:

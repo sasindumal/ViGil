@@ -37,7 +37,7 @@ class ScriptAnalysisCrew:
             backstory="You are a senior malware analyst specializing in script-based threats, command-and-control communication, and obfuscation techniques. You analyze script source code thoroughly, identify potential indicators of compromise (IOCs), map techniques to the MITRE ATT&CK framework, and write a unified, premium report with a clear verdict and risk score.",
             llm=self.llm,
             verbose=True,
-            memory=True,
+            memory=False,
         )
 
     async def run(

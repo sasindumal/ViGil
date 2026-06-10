@@ -2,15 +2,15 @@
   "malware_families": {},
   "ttps": {},
   "evasion_techniques": {
-    "GetLastError": 5,
-    "SetUnhandledExceptionFilter": 3,
-    "IsDebuggerPresent": 3,
+    "GetLastError": 6,
+    "SetUnhandledExceptionFilter": 4,
+    "IsDebuggerPresent": 4,
     "OutputDebugStringW": 1
   },
   "behavioral_patterns": [],
   "ioc_patterns": {
     "www.w3.org": 2,
-    "schemas.microsoft.com": 1,
+    "schemas.microsoft.com": 2,
     "crl3.digicert.com": 4,
     "crl4.digicert.com": 4,
     "www.digicert.com": 3,
@@ -32,6 +32,7 @@
     "nsis.sf.net": 1,
     "s.symcd.com06": 1,
     "ts-ocsp.ws.symantec.com0;": 1,
-    "d.symcb.com": 3
+    "d.symcb.com": 3,
+    "www.clamav.net": 1
   }
 }
