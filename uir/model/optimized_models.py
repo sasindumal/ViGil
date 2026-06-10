@@ -68,6 +68,13 @@ class OptimizedCNN(nn.Module):
             base = models.convnext_tiny(pretrained=pretrained)
 
         self.features = base.features
+        
+        # Freeze early stages (stages 0 to 5 of the 8 blocks in ConvNeXt-Tiny features)
+        # to prevent overfitting and retain pre-trained low/mid-level representations.
+        for i in range(6):
+            for param in self.features[i].parameters():
+                param.requires_grad = False
+                
         self.pool = nn.AdaptiveAvgPool2d((1, 1))
         self.proj = nn.Sequential(
             nn.Linear(768, self.OUT_DIM),
@@ -326,6 +333,9 @@ class OptimizedHGT(nn.Module):
 
         self.pool_q = nn.Linear(hidden, hidden)
         self.pool_k = nn.Linear(hidden, 1)
+        
+        # Projection layer to map concatenated pooling (Attention + Mean + Max) back to hidden space
+        self.pool_proj = nn.Linear(hidden * 3, hidden)
 
         self.out = nn.Sequential(
             nn.Linear(hidden, hidden), nn.GELU(), nn.LayerNorm(hidden), nn.Dropout(0.2),
@@ -347,9 +357,10 @@ class OptimizedHGT(nn.Module):
         jk_w = F.softmax(self.jk_weight, dim=0)
         x = sum(layer_outs[i] * jk_w[i] for i in range(len(layer_outs)))
 
-        # Attention pooling
-        k = self.pool_k(x).float()                       # [N, 1]
         B = int(batch.max().item()) + 1
+
+        # 1. Gated Attention pooling
+        k = self.pool_k(x).float()                       # [N, 1]
         k_max = torch.full((B, 1), -1e9, device=x.device, dtype=torch.float32)
         k_max.scatter_reduce_(0, batch.unsqueeze(-1), k, reduce="amax")
 
@@ -360,8 +371,25 @@ class OptimizedHGT(nn.Module):
         attn = k_exp / (k_sum[batch] + 1e-8)
 
         msg = x * attn
-        p = torch.zeros(B, x.size(1), device=x.device, dtype=msg.dtype)
-        p.scatter_add_(0, batch.unsqueeze(-1).expand_as(msg), msg)
+        p_attn = torch.zeros(B, x.size(1), device=x.device, dtype=msg.dtype)
+        p_attn.scatter_add_(0, batch.unsqueeze(-1).expand_as(msg), msg)
+
+        # 2. Mean pooling
+        ones = torch.ones_like(k)
+        counts = torch.zeros(B, 1, device=x.device, dtype=x.dtype)
+        counts.scatter_add_(0, batch.unsqueeze(-1), ones)
+        p_mean = torch.zeros(B, x.size(1), device=x.device, dtype=x.dtype)
+        p_mean.scatter_add_(0, batch.unsqueeze(-1).expand_as(x), x)
+        p_mean = p_mean / (counts + 1e-8)
+
+        # 3. Max pooling
+        p_max = torch.full((B, x.size(1)), -1e9, device=x.device, dtype=x.dtype)
+        p_max.scatter_reduce_(0, batch.unsqueeze(-1).expand_as(x), x, reduce="amax")
+        p_max = torch.where(p_max == -1e9, torch.zeros_like(p_max), p_max)
+
+        # Combine pooling strategies and project back to hidden
+        p_combined = torch.cat([p_attn, p_mean, p_max], dim=-1)
+        p = self.pool_proj(p_combined)
 
         return self.out(p)                               # [B, hidden*2]
 
@@ -369,6 +397,22 @@ class OptimizedHGT(nn.Module):
 # ──────────────────────────────────────────────────────────────────────────────
 # 6.  Deep Residual MLP Fusion Head
 # ──────────────────────────────────────────────────────────────────────────────
+
+class SEBlock(nn.Module):
+    """Squeeze-and-Excitation block for Channel-wise Multi-modal Attention."""
+
+    def __init__(self, channels: int, reduction: int = 16):
+        super().__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(channels, channels // reduction, bias=False),
+            nn.GELU(),
+            nn.Linear(channels // reduction, channels, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x * self.fc(x)
+
 
 class OptimizedFusion(nn.Module):
     """Deep Residual MLP classifier (replaces BNN for notebook-trained models).
@@ -379,6 +423,7 @@ class OptimizedFusion(nn.Module):
 
     def __init__(self, in_f: int, n_cls: int = 2, hidden: int = 1024):
         super().__init__()
+        self.se    = SEBlock(in_f, reduction=16)
         self.fc1   = nn.Linear(in_f, hidden)
         self.act1  = nn.GELU()
         self.norm1 = nn.LayerNorm(hidden)
@@ -396,6 +441,7 @@ class OptimizedFusion(nn.Module):
         self.head  = nn.Linear(hidden // 2, n_cls)
 
     def forward(self, x: torch.Tensor, sample: bool = True) -> torch.Tensor:
+        x   = self.se(x)
         res = self.fc1(x)
         x   = self.drop1(self.norm1(self.act1(res)))
         res2 = self.fc2(x)
