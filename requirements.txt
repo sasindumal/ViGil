@@ -19,3 +19,9 @@ pylnk3>=0.4.2
 # Hardware-optimized CPG build (optional but recommended)
 orjson>=3.9.0           # Fast JSON serialization (10-50x faster)
 msgpack>=1.0.5          # Binary serialization (optimal for Apple M4)
+
+# Multimodal and BNN dependencies
+transformers>=4.30.0
+peft>=0.4.0
+pillow>=9.0.0
+

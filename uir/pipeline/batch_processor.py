@@ -34,13 +34,18 @@ def _process_single_file(args: tuple) -> tuple:
     Worker function for processing a single file.
     Must be a top-level function for pickling in multiprocessing.
 
+    Outputs (per sample, named by zero-padded index):
+      <index>.cpg.json  — Code Property Graph
+      <index>.png       — Grayscale binary visualisation
+      <index>.feat.pt   — Pre-extracted feature tensors (original name stored as 'stem')
+
     Args:
-        args: (file_path_str, output_dir_str, config_dict)
+        args: (file_path_str, output_dir_str, use_fast_serialization, file_index)
 
     Returns:
         (file_path_str, success: bool, error_msg: str or None, node_count: int)
     """
-    file_path_str, output_dir_str, use_fast_serialization = args
+    file_path_str, output_dir_str, use_fast_serialization, file_index = args
 
     try:
         from .processor import FileProcessor
@@ -58,20 +63,26 @@ def _process_single_file(args: tuple) -> tuple:
         if cpg.num_nodes == 0:
             return (file_path_str, False, "Empty CPG (0 nodes)", 0)
 
-        # Save to output directory if specified
+        # ── Determine output subfolder (benign / malware) ─────────────────────
         if output_dir_str:
             output_dir = Path(output_dir_str)
-            # Determine benign/malware subfolder
             parent_name = file_path.parent.name.lower()
             if "malware" in parent_name or "malicious" in parent_name:
                 sub_dir = output_dir / "malwares"
+                label   = 1
             else:
                 sub_dir = output_dir / "benigns"
+                label   = 0
 
             sub_dir.mkdir(parents=True, exist_ok=True)
-            output_path = sub_dir / f"{file_path.stem}.cpg.json"
 
-            # Use optimized serialization if available
+            # Use zero-padded numeric name (preserves original name in .feat.pt)
+            num_name          = f"{file_index:06d}"
+            output_path       = sub_dir / f"{num_name}.cpg.json"
+            image_output_path = sub_dir / f"{num_name}.png"
+            feat_output_path  = sub_dir / f"{num_name}.feat.pt"
+
+            # ── 1. Save CPG ───────────────────────────────────────────────────
             if use_fast_serialization:
                 try:
                     cpg.save_optimized(output_path)
@@ -80,10 +91,72 @@ def _process_single_file(args: tuple) -> tuple:
             else:
                 cpg.save(output_path)
 
+            # ── 2. Save grayscale PNG ─────────────────────────────────────────
+            try:
+                processor.save_image(file_path, image_output_path)
+            except Exception as img_err:
+                logger.warning(f"Failed to generate image for {file_path}: {img_err}")
+
+            # ── 3. Build & save feature tensors (.feat.pt) ────────────────────
+            try:
+                import torch
+                from ..model.dataset import CPGDataset
+                from ..extraction.pe_feature_extractor import extract_ransomformer_features
+                from PIL import Image as PILImage
+                import torchvision.transforms as transforms
+
+                # CPG → node/edge tensors
+                _ds = CPGDataset.__new__(CPGDataset)
+                _ds.embedding_dim = config.tokenization.embedding_dim
+                _ds.max_nodes     = config.cpg.max_nodes_per_graph
+                data = _ds._cpg_to_data(cpg)
+
+                # Grayscale image → RGB tensor
+                image_transform = transforms.Compose([
+                    transforms.Resize((224, 224)),
+                    transforms.ToTensor(),
+                    transforms.Normalize(
+                        mean=[0.485, 0.456, 0.406],
+                        std =[0.229, 0.224, 0.225]
+                    ),
+                ])
+                if image_output_path.exists():
+                    img = PILImage.open(image_output_path).convert("RGB")
+                else:
+                    img = PILImage.fromarray(
+                        __import__("numpy").zeros((224, 224, 3), dtype="uint8")
+                    )
+                image_tensor = image_transform(img)   # [3, 224, 224]
+
+                # PE bytes + API tokens
+                api_names = list(cpg.metadata.get("imports", [])) if cpg.metadata else []
+                pe_bytes, api_tokens = extract_ransomformer_features(
+                    file_path, api_names=api_names
+                )
+
+                feat = {
+                    "x":          data.x,
+                    "edge_index": data.edge_index,
+                    "node_types": data.node_types,
+                    "edge_types": data.edge_types,
+                    "image":      image_tensor,
+                    "pe_bytes":   pe_bytes,
+                    "api_tokens": api_tokens,
+                    "label":      label,
+                    "stem":       file_path.stem,
+                }
+                torch.save(feat, feat_output_path)
+
+            except Exception as feat_err:
+                logger.warning(f"Failed to save .feat.pt for {file_path}: {feat_err}")
+
         return (file_path_str, True, None, cpg.num_nodes)
 
     except Exception as e:
         return (file_path_str, False, str(e), 0)
+
+
+
 
 
 class BatchProcessor:
@@ -219,8 +292,8 @@ class BatchProcessor:
 
         output_dir_str = str(output_dir) if output_dir else None
         args_list = [
-            (str(f), output_dir_str, self._use_fast_serialization)
-            for f in files
+            (str(f), output_dir_str, self._use_fast_serialization, idx)
+            for idx, f in enumerate(files)
         ]
 
         with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
@@ -266,8 +339,8 @@ class BatchProcessor:
             batch_count += 1
 
             args_list = [
-                (str(f), output_dir_str, self._use_fast_serialization)
-                for f in batch
+                (str(f), output_dir_str, self._use_fast_serialization, batch_start + i)
+                for i, f in enumerate(batch)
             ]
 
             logger.debug(f"M4 batch {batch_count}: {len(batch)} files")
@@ -318,8 +391,8 @@ class BatchProcessor:
         # Combined here for simplicity with higher worker count
 
         args_list = [
-            (str(f), output_dir_str, self._use_fast_serialization)
-            for f in files
+            (str(f), output_dir_str, self._use_fast_serialization, idx)
+            for idx, f in enumerate(files)
         ]
 
         # Use more workers for GPU profile — I/O is bottleneck

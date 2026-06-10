@@ -46,6 +46,14 @@ class FileProcessor:
         self.storage = None
         if self.config.cpg_cache_dir:
             self.storage = CPGStorage(self.config.cpg_cache_dir)
+            
+    def save_image(self, file_path: Path, output_path: Path) -> bool:
+        """
+        Generate and save a grayscale image from a PE or other binary file.
+        """
+        from ..extraction.image_generator import save_grayscale_image
+        return save_grayscale_image(file_path, output_path)
+
     
     def process(self, file_path: Path, use_cache: bool = True) -> Optional[CodePropertyGraph]:
         """
