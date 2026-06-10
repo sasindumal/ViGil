@@ -1,6 +1,10 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 
-export function useWebSocket(url) {
+export function useWebSocket(url, onMessage) {
+  const onMessageRef = useRef(onMessage);
+  useEffect(() => {
+    onMessageRef.current = onMessage;
+  }, [onMessage]);
   const [messages, setMessages] = useState([]);
   const [lastMessage, setLastMessage] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -34,10 +38,15 @@ export function useWebSocket(url) {
           // Respond to heartbeats (pong)
           if (data.type === 'pong') return;
 
+          console.log("[useWebSocket] Received:", data);
           logger("WebSocket received message:", data);
+          if (onMessageRef.current) {
+            onMessageRef.current(data);
+          }
           setLastMessage(data);
           setMessages((prev) => [...prev, data]);
         } catch (e) {
+          console.error("[useWebSocket] Error parsing message:", e);
           logger("Error parsing WebSocket message:", e);
         }
       };

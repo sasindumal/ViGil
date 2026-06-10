@@ -118,6 +118,46 @@ class PEAnalysisCrew:
             self.agent_report,
         ]
 
+        # Setup callbacks to stream live progress to frontend via WebSocket
+        loop = asyncio.get_event_loop()
+
+        def make_callback(agent_role: str, next_agent_role: Optional[str] = None):
+            def task_callback(task_output):
+                if event_emitter and analysis_id:
+                    raw_text = getattr(task_output, "raw", str(task_output))
+                    # 1. Emit completed event for current agent
+                    asyncio.run_coroutine_threadsafe(
+                        event_emitter.emit_agent(
+                            analysis_id=analysis_id,
+                            agent_name=agent_role,
+                            event_type=EventType.AGENT_COMPLETED,
+                            message=f"{agent_role} completed analysis.",
+                            data={"output": raw_text}
+                        ),
+                        loop
+                    )
+                    # 2. Emit started event for next agent
+                    if next_agent_role:
+                        asyncio.run_coroutine_threadsafe(
+                            event_emitter.emit_agent(
+                                analysis_id=analysis_id,
+                                agent_name=next_agent_role,
+                                event_type=EventType.AGENT_STARTED,
+                                message=f"{next_agent_role} is starting analysis...",
+                            ),
+                            loop
+                        )
+            return task_callback
+
+        task_struct.callback = make_callback("Senior PE Structural Analyst", "API Import Behavior Analyst")
+        task_imp.callback = make_callback("API Import Behavior Analyst", "Network Intelligence Analyst")
+        task_net.callback = make_callback("Network Intelligence Analyst", "Evasion & Obfuscation Specialist")
+        task_evasion.callback = make_callback("Evasion & Obfuscation Specialist", "String & NLP Intelligence Analyst")
+        task_str.callback = make_callback("String & NLP Intelligence Analyst", "Results Analysis Coordinator")
+        task_res.callback = make_callback("Results Analysis Coordinator", "ML Model & Agent Consensus Analyst")
+        task_model.callback = make_callback("ML Model & Agent Consensus Analyst", "Senior Threat Intelligence Report Writer")
+        task_report.callback = make_callback("Senior Threat Intelligence Report Writer", None)
+
         # Fetch memory settings
         crew_mem_config = self.memory_mgr.get_crew_memory_config(self.llm, "pe_analysis_crew")
 
@@ -137,6 +177,13 @@ class PEAnalysisCrew:
                 event_type=EventType.STEP_STARTED,
                 message="CrewAI PE Agents starting static and consensus analysis...",
                 progress=0.0
+            )
+            # Emit starting event for first agent
+            await event_emitter.emit_agent(
+                analysis_id=analysis_id,
+                agent_name="Senior PE Structural Analyst",
+                event_type=EventType.AGENT_STARTED,
+                message="Senior PE Structural Analyst starting static structure analysis...",
             )
 
         # Kickoff crew execution

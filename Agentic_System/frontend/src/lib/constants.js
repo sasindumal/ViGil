@@ -18,6 +18,7 @@ export const AGENT_ROLES = {
   "Results Analysis Coordinator": { color: "#a855f7", number: 6, type: "pe" },
   "ML Model & Agent Consensus Analyst": { color: "#3b82f6", number: 7, type: "pe" },
   "Senior Threat Intelligence Report Writer": { color: "#10b981", number: 8, type: "shared" },
+  "Universal Script Threat Analyst": { color: "#10b981", number: 9, type: "script" },
 
   // Script Agents
   "Script Language Identifier": { color: "#00d4ff", number: 9, type: "script" },

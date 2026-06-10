@@ -58,6 +58,18 @@ async def _run_bg_analysis(file_path: Path, analysis_id: str):
             "progress": 1.0,
             "error": str(exc),
         })
+        
+        # Broadcast failure to WebSocket subscribers
+        try:
+            from backend.core.event_emitter import get_emitter, AnalysisEvent, EventType
+            emitter = get_emitter()
+            await emitter.emit(AnalysisEvent(
+                event_type=EventType.ANALYSIS_FAILED,
+                analysis_id=analysis_id,
+                message=str(exc)
+            ))
+        except Exception as emit_err:
+            logger.error("Failed to emit analysis_failed event: %s", emit_err)
 
     finally:
         # Clean up target upload file to ensure safe operations

@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useAnalysis } from '../../../hooks/useAnalysis';
-import AnalysisProgress from '../../../components/AnalysisProgress';
+import AgentsChat from '../../../components/AgentsChat';
 import AgentActivity from '../../../components/AgentActivity';
 import RiskGauge from '../../../components/RiskGauge';
 import EntropyChart from '../../../components/EntropyChart';
@@ -22,10 +22,25 @@ export default function AnalysisView() {
     report,
     error,
     agentActivity,
+    mlPrediction,
   } = useAnalysis(id);
 
   const [activeTab, setActiveTab] = useState('overview'); // overview, details, agents, report
   const [activeAccordion, setActiveAccordion] = useState('headers');
+
+  const [isLiveAnalysis, setIsLiveAnalysis] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const [hasInitializedLive, setHasInitializedLive] = useState(false);
+
+  React.useEffect(() => {
+    if (status !== 'idle' && status !== 'loading' && !hasInitializedLive) {
+      setHasInitializedLive(true);
+      if (status !== 'completed' && status !== 'failed') {
+        setIsLiveAnalysis(true);
+        setShowChat(true);
+      }
+    }
+  }, [status, hasInitializedLive]);
 
   if (error) {
     return (
@@ -63,17 +78,21 @@ export default function AnalysisView() {
         )}
       </div>
 
-      {/* Stepper progress */}
-      <AnalysisProgress currentStep={status} progress={progress} />
-
-      {/* Live agent activity grid */}
-      {!isComplete && (
-        <AgentActivity route={fileInfo?.route || 'pe'} agentActivity={agentActivity} />
-      )}
-
-      {/* Results Tab interface */}
-      {showResults && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }} className="animate-slide">
+      {/* Group Chat Screen during active analysis */}
+      {showChat ? (
+        <AgentsChat
+          analysisId={id}
+          status={status}
+          progress={progress}
+          fileInfo={fileInfo}
+          results={results}
+          agentActivity={agentActivity}
+          mlPrediction={mlPrediction}
+          onComplete={() => setShowChat(false)}
+        />
+      ) : (
+        showResults && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }} className="animate-slide">
           {/* Tabs */}
           <div style={{
             display: 'flex',
@@ -352,7 +371,8 @@ export default function AnalysisView() {
             <ReportViewer analysisId={id} markdown={report} />
           )}
         </div>
-      )}
+      )
+    )}
     </div>
   );
 }

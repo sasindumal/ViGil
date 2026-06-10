@@ -124,6 +124,25 @@ You must write a comprehensive, markdown-formatted final security report using t
             **crew_mem_config
         )
 
+        # Setup callback to stream live progress to frontend via WebSocket
+        loop = asyncio.get_event_loop()
+
+        def task_callback(task_output):
+            if event_emitter and analysis_id:
+                raw_text = getattr(task_output, "raw", str(task_output))
+                asyncio.run_coroutine_threadsafe(
+                    event_emitter.emit_agent(
+                        analysis_id=analysis_id,
+                        agent_name=self.agent.role,
+                        event_type=EventType.AGENT_COMPLETED,
+                        message="Universal Script Threat Analyst completed analysis.",
+                        data={"output": raw_text}
+                    ),
+                    loop
+                )
+
+        task.callback = task_callback
+
         # Helper callback to stream progress
         if event_emitter and analysis_id:
             await event_emitter.emit_step(
@@ -132,6 +151,13 @@ You must write a comprehensive, markdown-formatted final security report using t
                 event_type=EventType.STEP_STARTED,
                 message="CrewAI Script Analyst starting analysis...",
                 progress=0.0
+            )
+            # Emit starting event for the analyst agent
+            await event_emitter.emit_agent(
+                analysis_id=analysis_id,
+                agent_name=self.agent.role,
+                event_type=EventType.AGENT_STARTED,
+                message="Universal Script Threat Analyst starting script analysis...",
             )
 
         # Kickoff crew execution

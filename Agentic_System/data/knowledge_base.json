@@ -1,9 +1,12 @@
 {
   "malware_families": {},
   "ttps": {},
-  "evasion_techniques": {},
+  "evasion_techniques": {
+    "GetLastError": 1
+  },
   "behavioral_patterns": [],
   "ioc_patterns": {
-    "www.w3.org": 1
+    "www.w3.org": 1,
+    "schemas.microsoft.com": 1
   }
 }
