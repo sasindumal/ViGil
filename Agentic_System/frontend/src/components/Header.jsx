@@ -23,29 +23,18 @@ export default function Header({ isWsConnected = false }) {
       borderRight: 'none',
       background: 'rgba(10, 14, 26, 0.7)'
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <div style={{
-          background: 'linear-gradient(135deg, var(--color-primary), var(--color-purple))',
-          padding: '8px',
-          borderRadius: '8px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxShadow: '0 0 15px rgba(0, 212, 255, 0.3)'
-        }}>
-          <Shield size={20} color="#fff" />
-        </div>
-        <span style={{
-          fontSize: '18px',
-          fontWeight: '800',
-          letterSpacing: '0.05em',
-          background: 'linear-gradient(90deg, #fff, var(--text-muted))',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent'
-        }}>
-          VIGIL
-        </span>
-      </div>
+      <Link href="/" style={{ display: 'flex', alignItems: 'center', textDecoration: 'none' }}>
+        <img 
+          src="/vigil-logo.svg" 
+          alt="ViGil Logo" 
+          style={{ 
+            height: '32px', 
+            display: 'block',
+            userSelect: 'none',
+            pointerEvents: 'none'
+          }} 
+        />
+      </Link>
 
       <nav style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <Link href="/" className="btn-ghost" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', fontSize: '14px' }}>

@@ -53,6 +53,7 @@ export default function RootLayout({ children }) {
         <title>ViGil — Agentic Malware Vulnerability Analysis</title>
         <meta name="description" content="AI-powered malware threat forensics, neural network predictions, and multi-agent consensus reporting." />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="icon" href="/vigil-icon.svg" type="image/svg+xml" />
       </head>
       <body>
         <Header isWsConnected={wsConnected} />

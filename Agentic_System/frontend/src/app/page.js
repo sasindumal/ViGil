@@ -39,23 +39,65 @@ export default function Dashboard() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px', width: '100%' }} className="animate-slide">
       {/* Hero Header */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <h1 style={{
-          fontSize: '32px',
-          fontWeight: '800',
-          letterSpacing: '-0.02em',
-          background: 'linear-gradient(90deg, #ffffff, #8b5cf6, var(--color-primary))',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          lineHeight: '1.2'
-        }}>
-          Agentic Malware Analysis & Forensics
-        </h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: '15px', maxWidth: '720px' }}>
-          Deconstruct payloads dynamically. ViGil uses a joint multi-modal deep learning model
-          paired with 24 specialized CrewAI security agents to static-analyze malware structural characteristics,
-          imports, strings, obfuscation patterns, and behavior.
-        </p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '40px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: '1', minWidth: '300px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
+            <span style={{ 
+              padding: '4px 10px', 
+              fontSize: '10px', 
+              fontWeight: '700', 
+              letterSpacing: '0.1em',
+              background: 'rgba(0, 242, 254, 0.08)',
+              border: '1px solid rgba(0, 242, 254, 0.2)',
+              borderRadius: '20px',
+              color: 'var(--color-primary)'
+            }}>
+              VIGIL SECURITY v1.0.0
+            </span>
+          </div>
+          <h1 style={{
+            fontSize: '36px',
+            fontWeight: '900',
+            letterSpacing: '-0.03em',
+            background: 'linear-gradient(90deg, #ffffff, #8b5cf6, var(--color-primary))',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            lineHeight: '1.2'
+          }}>
+            Agentic Malware Analysis &amp; Forensics
+          </h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: '15px', lineHeight: '1.6', maxWidth: '720px' }}>
+            Deconstruct payloads dynamically. ViGil combines a joint multi-modal deep learning model
+            with a parallelized CrewAI security agent swarm to analyze malware structural characteristics,
+            API import behaviors, strings, obfuscation patterns, and evasion techniques.
+          </p>
+        </div>
+        
+        {/* Large Brand Icon Showcase */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '120px',
+          height: '120px',
+          borderRadius: '24px',
+          background: 'rgba(255, 255, 255, 0.01)',
+          border: '1px solid rgba(255, 255, 255, 0.05)',
+          padding: '16px',
+          boxShadow: '0 8px 32px 0 rgba(0, 242, 254, 0.05), inset 0 0 24px rgba(139, 92, 246, 0.05)',
+          backdropFilter: 'blur(8px)',
+          userSelect: 'none'
+        }} className="glass-card">
+          <img 
+            src="/vigil-icon.svg" 
+            alt="ViGil Logo Symbol" 
+            style={{ 
+              width: '100%', 
+              height: '100%', 
+              filter: 'drop-shadow(0 0 10px rgba(0, 242, 254, 0.2))'
+            }} 
+          />
+        </div>
       </div>
 
       {/* Upload zone */}
