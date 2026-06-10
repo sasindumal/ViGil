@@ -91,10 +91,13 @@ You must write a premium, modern, highly structured Markdown security report usi
 
 # THREAT INTELLIGENCE & FORENSICS REPORT
 
+# VERDICT: MALWARE (or BENIGN)
+## CONFIDENCE: <confidence>% | VIGIL THREAT MATRIX SCORE: <score>/100
+
+---
+
 ## 1. Executive Summary
 > [!WARNING] (or [!NOTE] if benign, [!CAUTION] if high danger malware)
-> **VERDICT**: MALWARE (or BENIGN) | **RISK SCORE**: <score>/100 | **CONFIDENCE**: <confidence>%
-> 
 > *Write a 3-4 sentence high-level executive summary of the script's nature, suspicious actions detected, and threat impact.*
 
 ## 2. File Metadata & Overview
@@ -216,7 +219,7 @@ List 3-4 actionable security recommendations or defensive measures.
 
         # Extract risk score and confidence if explicitly mentioned
         try:
-            risk_match = re.search(r"RISK\s*SCORE\s*\*?[:*]*\s*(\d+)", report_upper)
+            risk_match = re.search(r"(?:RISK\s*SCORE|MATRIX\s*SCORE|THREAT\s*MATRIX\s*SCORE)\s*\*?[:*]*\s*(\d+)", report_upper)
             if risk_match:
                 risk_score = float(risk_match.group(1))
             conf_match = re.search(r"CONFIDENCE\s*\*?[:*]*\s*(\d+)", report_upper)

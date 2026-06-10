@@ -31,10 +31,13 @@ Use the following exact structure and style:
 
 # THREAT INTELLIGENCE & FORENSICS REPORT
 
+# VERDICT: MALWARE (or BENIGN)
+## CONFIDENCE: <confidence>% | VIGIL THREAT MATRIX SCORE: <score>/100
+
+---
+
 ## 1. Executive Summary
 > [!WARNING] (or [!NOTE] if benign, [!CAUTION] if high danger malware)
-> **VERDICT**: MALWARE (or BENIGN) | **RISK SCORE**: <score>/100 | **CONFIDENCE**: <confidence>%
-> 
 > *Write a 3-4 sentence high-level executive summary of the file nature, major threats detected, and impact.*
 
 ## 2. File Metadata & Overview

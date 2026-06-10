@@ -203,10 +203,12 @@ class AnalysisOrchestrator:
 
             # Run PE Agent Crew
             pe_crew = PEAnalysisCrew()
+            if route != "container":
+                pe_json["file_name"] = display_name
             crew_res = await pe_crew.run(pe_json, ml_pred, self.emitter, analysis_id)
 
             pe_results_list.append({
-                "file_name": pf.name,
+                "file_name": display_name if route != "container" else pf.name,
                 "file_hash": pf_hash,
                 "static_analysis": pe_json,
                 "ml_prediction": ml_pred,
@@ -224,10 +226,11 @@ class AnalysisOrchestrator:
                 content = ""
 
             script_crew = ScriptAnalysisCrew()
-            crew_res = await script_crew.run(content, sf.name, self.emitter, analysis_id)
+            actual_script_name = display_name if route != "container" else sf.name
+            crew_res = await script_crew.run(content, actual_script_name, self.emitter, analysis_id)
 
             script_results_list.append({
-                "file_name": sf.name,
+                "file_name": actual_script_name,
                 "file_hash": sf_hash,
                 "agent_analysis": crew_res,
             })

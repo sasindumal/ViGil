@@ -9,7 +9,7 @@
   },
   "behavioral_patterns": [],
   "ioc_patterns": {
-    "www.w3.org": 1,
+    "www.w3.org": 2,
     "schemas.microsoft.com": 1,
     "crl3.digicert.com": 4,
     "crl4.digicert.com": 4,

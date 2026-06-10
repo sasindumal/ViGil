@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Any, Optional
 
 from crewai import Crew, Process
@@ -255,6 +256,18 @@ class PEAnalysisCrew:
             verdict = "BENIGN"
             risk_score = 20.0
             confidence = 90.0
+
+        # Try to parse exact risk score and confidence from model output or final report
+        try:
+            combined_text = (model_output_text + "\n" + final_report.upper())
+            risk_match = re.search(r"(?:RISK\s*SCORE|MATRIX\s*SCORE|THREAT\s*MATRIX\s*SCORE)\s*\*?[:*]*\s*(\d+)", combined_text)
+            if risk_match:
+                risk_score = float(risk_match.group(1))
+            conf_match = re.search(r"CONFIDENCE\s*\*?[:*]*\s*(\d+)", combined_text)
+            if conf_match:
+                confidence = float(conf_match.group(1))
+        except Exception:
+            pass
 
         if event_emitter and analysis_id:
             await event_emitter.emit_step(
