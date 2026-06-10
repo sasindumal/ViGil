@@ -321,7 +321,7 @@ export default function AgentsChat({
     <div style={{
       display: 'flex',
       flexDirection: 'column',
-      height: '640px',
+      height: '850px',
       background: 'rgba(8, 12, 26, 0.6)',
       border: '1px solid var(--border-color)',
       borderRadius: '16px',
