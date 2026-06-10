@@ -221,20 +221,6 @@ export default function AgentsChat({
   // Stage 7: Live Agent Updates
   useEffect(() => {
     if (chatStage === 7) {
-      // Find if any agent is currently thinking
-      const thinkingAgent = Object.entries(agentActivity).find(
-        ([_, act]) => act.status === 'thinking'
-      );
-
-      if (thinkingAgent) {
-        const [agentName] = thinkingAgent;
-        const roleMeta = AGENT_ROLES[agentName] || { color: '#00ff88' };
-        setTypingUser({ name: agentName, avatar: Bot, color: roleMeta.color });
-      } else {
-        // Fallback typing
-        setTypingUser({ name: 'ViGil Agents Group', avatar: Bot, color: '#00ff88' });
-      }
-
       // Check if any agent has completed but hasn't been printed yet
       const completedAgents = Object.entries(agentActivity).filter(
         ([agentName, act]) => act.status === 'completed' && !printedAgents.includes(agentName)
@@ -315,6 +301,23 @@ export default function AgentsChat({
 
   const toggleExpandMessage = (id) => {
     setExpandedMessageId(prev => prev === id ? null : id);
+  };
+
+  const activeThinkingAgents = Object.entries(agentActivity)
+    .filter(([_, act]) => act.status === 'thinking')
+    .map(([name]) => name);
+
+  const getThinkingText = (agents) => {
+    if (agents.length === 1) {
+      return `${agents[0]} is analyzing`;
+    }
+    if (agents.length === 2) {
+      return `${agents[0]} and ${agents[1]} are analyzing`;
+    }
+    if (agents.length === 3) {
+      return `${agents[0]}, ${agents[1]} and ${agents[2]} are analyzing`;
+    }
+    return `${agents[0]}, ${agents[1]} and ${agents.length - 2} other agents are analyzing`;
   };
 
   return (
@@ -552,7 +555,66 @@ export default function AgentsChat({
         })}
 
         {/* Typing Indicator */}
-        {typingUser && (
+        {chatStage === 7 && activeThinkingAgents.length > 0 ? (
+          <div style={{
+            display: 'flex',
+            alignSelf: 'flex-start',
+            gap: '12px',
+            maxWidth: '75%',
+            alignItems: 'center'
+          }} className="animate-fade">
+            {/* Overlapping Avatar Stack */}
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              position: 'relative', 
+              height: '32px', 
+              minWidth: `${Math.min(activeThinkingAgents.length, 3) * 16 + 12}px` 
+            }}>
+              {activeThinkingAgents.slice(0, 3).map((agentName, idx) => {
+                const roleMeta = AGENT_ROLES[agentName] || { color: '#00ff88' };
+                return (
+                  <div key={agentName} style={{
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '50%',
+                    background: 'rgba(8, 12, 26, 0.9)',
+                    border: `1.5px solid ${roleMeta.color}`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    position: 'absolute',
+                    left: `${idx * 16}px`,
+                    zIndex: 10 - idx,
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
+                  }}>
+                    <Bot size={13} color={roleMeta.color} />
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{
+              background: 'rgba(16, 22, 42, 0.3)',
+              border: '1px solid var(--border-color)',
+              padding: '10px 16px',
+              borderRadius: '18px',
+              fontSize: '12px',
+              color: 'var(--text-muted)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              backdropFilter: 'var(--glass-blur)',
+            }}>
+              <span>{getThinkingText(activeThinkingAgents)}</span>
+              <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
+                <span style={{ width: '4px', height: '4px', background: '#00ff88', borderRadius: '50%', animation: 'pulse 1.2s infinite ease-in-out 0s' }}></span>
+                <span style={{ width: '4px', height: '4px', background: '#00ff88', borderRadius: '50%', animation: 'pulse 1.2s infinite ease-in-out 0.2s' }}></span>
+                <span style={{ width: '4px', height: '4px', background: '#00ff88', borderRadius: '50%', animation: 'pulse 1.2s infinite ease-in-out 0.4s' }}></span>
+              </div>
+            </div>
+          </div>
+        ) : typingUser ? (
           <div style={{
             display: 'flex',
             alignSelf: 'flex-start',
@@ -593,7 +655,7 @@ export default function AgentsChat({
               </div>
             </div>
           </div>
-        )}
+        ) : null}
 
         <div ref={chatEndRef} />
       </div>

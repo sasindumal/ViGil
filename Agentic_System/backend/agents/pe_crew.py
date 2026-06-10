@@ -90,6 +90,14 @@ class PEAnalysisCrew:
         task_net = network_intel.create_task(self.agent_network, context_str)
         task_evasion = evasion_specialist.create_task(self.agent_evasion, context_str)
         task_str = string_nlp.create_task(self.agent_string, context_str)
+        
+        # Set first 5 tasks to execute asynchronously in parallel
+        task_struct.async_execution = True
+        task_imp.async_execution = True
+        task_net.async_execution = True
+        task_evasion.async_execution = True
+        task_str.async_execution = True
+
         task_res = results_analyzer.create_task(self.agent_results, context_str)
         task_model = model_comparator.create_task(self.agent_model, context_str)
         task_report = report_generator.create_task(self.agent_report, context_str)
@@ -120,6 +128,14 @@ class PEAnalysisCrew:
 
         # Setup callbacks to stream live progress to frontend via WebSocket
         loop = asyncio.get_event_loop()
+        completed_parallel_tasks = set()
+        parallel_roles = {
+            "Senior PE Structural Analyst",
+            "API Import Behavior Analyst",
+            "Network Intelligence Analyst",
+            "Evasion & Obfuscation Specialist",
+            "String & NLP Intelligence Analyst"
+        }
 
         def make_callback(agent_role: str, next_agent_role: Optional[str] = None):
             def task_callback(task_output):
@@ -136,8 +152,22 @@ class PEAnalysisCrew:
                         ),
                         loop
                     )
-                    # 2. Emit started event for next agent
-                    if next_agent_role:
+                    
+                    # 2. Check parallel task completion or trigger next sequential agent
+                    if agent_role in parallel_roles:
+                        completed_parallel_tasks.add(agent_role)
+                        if len(completed_parallel_tasks) == 5:
+                            # Start the Results Analysis Coordinator
+                            asyncio.run_coroutine_threadsafe(
+                                event_emitter.emit_agent(
+                                    analysis_id=analysis_id,
+                                    agent_name="Results Analysis Coordinator",
+                                    event_type=EventType.AGENT_STARTED,
+                                    message="Results Analysis Coordinator is starting synthesis...",
+                                ),
+                                loop
+                            )
+                    elif next_agent_role:
                         asyncio.run_coroutine_threadsafe(
                             event_emitter.emit_agent(
                                 analysis_id=analysis_id,
@@ -149,11 +179,11 @@ class PEAnalysisCrew:
                         )
             return task_callback
 
-        task_struct.callback = make_callback("Senior PE Structural Analyst", "API Import Behavior Analyst")
-        task_imp.callback = make_callback("API Import Behavior Analyst", "Network Intelligence Analyst")
-        task_net.callback = make_callback("Network Intelligence Analyst", "Evasion & Obfuscation Specialist")
-        task_evasion.callback = make_callback("Evasion & Obfuscation Specialist", "String & NLP Intelligence Analyst")
-        task_str.callback = make_callback("String & NLP Intelligence Analyst", "Results Analysis Coordinator")
+        task_struct.callback = make_callback("Senior PE Structural Analyst")
+        task_imp.callback = make_callback("API Import Behavior Analyst")
+        task_net.callback = make_callback("Network Intelligence Analyst")
+        task_evasion.callback = make_callback("Evasion & Obfuscation Specialist")
+        task_str.callback = make_callback("String & NLP Intelligence Analyst")
         task_res.callback = make_callback("Results Analysis Coordinator", "ML Model & Agent Consensus Analyst")
         task_model.callback = make_callback("ML Model & Agent Consensus Analyst", "Senior Threat Intelligence Report Writer")
         task_report.callback = make_callback("Senior Threat Intelligence Report Writer", None)
@@ -178,13 +208,20 @@ class PEAnalysisCrew:
                 message="CrewAI PE Agents starting static and consensus analysis...",
                 progress=0.0
             )
-            # Emit starting event for first agent
-            await event_emitter.emit_agent(
-                analysis_id=analysis_id,
-                agent_name="Senior PE Structural Analyst",
-                event_type=EventType.AGENT_STARTED,
-                message="Senior PE Structural Analyst starting static structure analysis...",
-            )
+            # Emit starting event for all 5 parallel agents
+            for agent_role in [
+                "Senior PE Structural Analyst",
+                "API Import Behavior Analyst",
+                "Network Intelligence Analyst",
+                "Evasion & Obfuscation Specialist",
+                "String & NLP Intelligence Analyst"
+            ]:
+                await event_emitter.emit_agent(
+                    analysis_id=analysis_id,
+                    agent_name=agent_role,
+                    event_type=EventType.AGENT_STARTED,
+                    message=f"{agent_role} starting analysis...",
+                )
 
         # Kickoff crew execution
         # We run inside the event loop executor to prevent blocking
