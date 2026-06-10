@@ -29,12 +29,12 @@ router = APIRouter(prefix="/api/analysis", tags=["Analysis"])
 _analyses: Dict[str, dict[str, Any]] = {}
 
 
-async def _run_bg_analysis(file_path: Path, analysis_id: str):
+async def _run_bg_analysis(file_path: Path, analysis_id: str, original_filename: str):
     """Background task to run orchestrator and save state."""
     _analyses[analysis_id] = {
         "status": "identifying",
         "progress": 0.0,
-        "file_name": file_path.name,
+        "file_name": original_filename,
         "file_size": file_path.stat().st_size,
         "results": None,
         "report": None,
@@ -42,7 +42,7 @@ async def _run_bg_analysis(file_path: Path, analysis_id: str):
 
     try:
         orchestrator = AnalysisOrchestrator()
-        results = await orchestrator.run_analysis(file_path, analysis_id)
+        results = await orchestrator.run_analysis(file_path, analysis_id, original_filename)
 
         _analyses[analysis_id].update({
             "status": "completed",
@@ -104,7 +104,7 @@ async def upload_file(
         raise HTTPException(status_code=500, detail=f"File save error: {exc}")
 
     # Queue background task
-    background_tasks.add_task(_run_bg_analysis, temp_path, analysis_id)
+    background_tasks.add_task(_run_bg_analysis, temp_path, analysis_id, file.filename)
 
     return {
         "analysis_id": analysis_id,

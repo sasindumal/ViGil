@@ -53,7 +53,7 @@ class AnalysisOrchestrator:
         self.kb = KnowledgeBase()
         self.emitter = get_emitter()
 
-    async def run_analysis(self, file_path: Path, analysis_id: str) -> dict[str, Any]:
+    async def run_analysis(self, file_path: Path, analysis_id: str, original_filename: str = None) -> dict[str, Any]:
         """Execute the complete ViGil malware analysis pipeline.
 
         Parameters
@@ -62,18 +62,21 @@ class AnalysisOrchestrator:
             The local file path to analyze.
         analysis_id:
             A unique session ID (UUID).
+        original_filename:
+            The original name of the uploaded file.
 
         Returns
         -------
         dict
             The consolidated results dictionary containing all outputs.
         """
-        logger.info("Starting orchestrator analysis for %s (ID: %s)", file_path.name, analysis_id[:8])
+        display_name = original_filename or file_path.name
+        logger.info("Starting orchestrator analysis for %s (ID: %s)", display_name, analysis_id[:8])
         await self.emitter.emit_step(
             analysis_id=analysis_id,
             step="initialization",
             event_type=EventType.ANALYSIS_STARTED,
-            message=f"Beginning analysis of {file_path.name}...",
+            message=f"Beginning analysis of {display_name}...",
             progress=0.0
         )
 
@@ -262,7 +265,7 @@ class AnalysisOrchestrator:
 
         final_results = {
             "analysis_id": analysis_id,
-            "file_name": file_path.name,
+            "file_name": display_name,
             "file_hash": file_hash,
             "route": route,
             "verdict": final_verdict,
@@ -277,7 +280,7 @@ class AnalysisOrchestrator:
         await self.ltm.store_analysis(
             analysis_id=analysis_id,
             file_hash=file_hash,
-            file_name=file_path.name,
+            file_name=display_name,
             file_type=route,
             verdict=final_verdict,
             confidence=confidence,
