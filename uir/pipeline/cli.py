@@ -261,122 +261,114 @@ def cmd_train(args):
 
 
 def cmd_predict(args):
-    """Run prediction using the quad-modal joint model (HGT+ResNet+RansomFormer+BNN)."""
+    """Run prediction using the notebook-accurate quad-modal joint model."""
+    import json
     import torch
     import torchvision.transforms as transforms
     from .processor import FileProcessor
-    from ..model.hgt import HeterogeneousGraphTransformer
-    from ..model.joint_model import BayesianClassifier, JointMalwareModel
-    from ..model.resnet_extractor import ResNetFeatureExtractor
-    from ..model.ransomformer import RansomFormerEncoder
+    from ..model.optimized_models import build_model
     from ..model.dataset import CPGDataset, collate_cpg_batch
     from ..extraction.image_generator import pe_to_grayscale_image
     from ..extraction.pe_feature_extractor import extract_ransomformer_features
     from ..config import UIRConfig
-    
+
     model_path = Path(args.model)
     input_path = Path(args.input)
-    
+
     if not model_path.exists():
         logger.error(f"Model not found: {model_path}")
         return 1
-    
-    config = UIRConfig()
-    
-    # Reconstruct identical joint architecture for loading state
-    hgt_model = HeterogeneousGraphTransformer(
-        input_dim=config.model.embedding_dim,
-        hidden_dim=config.model.hidden_dim,
-        num_layers=config.model.num_layers,
-        num_heads=config.model.num_heads,
-        num_classes=config.model.num_classes
-    )
-    resnet_extractor = ResNetFeatureExtractor(pretrained=False)  # weights loaded from checkpoint
-    ransomformer     = RansomFormerEncoder()
-    bnn_classifier   = BayesianClassifier(
-        in_features=config.model.hidden_dim * 2 + 384 + 256,  # 512+384+256 = 1152
-        num_classes=config.model.num_classes
-    )
-    model = JointMalwareModel(hgt_model, resnet_extractor, ransomformer, bnn_classifier)
-    
-    # Load model checkpoint
-    logger.info(f"Loading joint model checkpoint from {model_path}")
-    checkpoint = torch.load(model_path, map_location='cpu')
-    
-    # Auto-detect if checkpoint was trained using fallback CNN or LeViT LoRA
-    checkpoint_keys = checkpoint['model_state'].keys()
-    has_fallback = any(k.startswith('levit.fallback_conv') for k in checkpoint_keys)
-    has_peft = any('lora_' in k for k in checkpoint_keys)
-    
-    if has_fallback and not has_peft:
-        logger.info("Checkpoint matches Fallback CNN mode. Toggling fallback in LeViT extractor.")
-        model.levit.is_fallback = True
-        
-    model.load_state_dict(checkpoint['model_state'], strict=False)
+
+    # Load model_config.json from next to the checkpoint if available
+    cfg_path = model_path.parent.parent / "model_config.json"
+    cfg = {}
+    if cfg_path.exists():
+        with open(cfg_path) as fh:
+            cfg = json.load(fh)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    logger.info(f"Loading checkpoint from {model_path}")
+    ckpt  = torch.load(model_path, map_location=device)
+    state = ckpt.get("model_state", ckpt)
+
+    # Auto-detect embedding_dim from checkpoint weights
+    if "hgt.proj.0.weight" in state:
+        weight_shape = state["hgt.proj.0.weight"].shape
+        if len(weight_shape) == 2:
+            detected_dim = weight_shape[1]
+            if detected_dim != cfg.get("embedding_dim"):
+                logger.info(f"Auto-detected embedding_dim={detected_dim} from checkpoint (was {cfg.get('embedding_dim')})")
+                cfg["embedding_dim"] = detected_dim
+
+    # Build notebook-accurate architecture
+    model = build_model(cfg, device)
+    model.load_state_dict(state, strict=False)
     model.eval()
-    
-    # Process single file (CPG extraction)
+
+    # ── CPG extraction ────────────────────────────────────────────────────────
+    config    = UIRConfig()
     processor = FileProcessor(config)
     logger.info(f"Processing CPG for: {input_path}")
     cpg = processor.process(input_path, use_cache=False)
-    
+
     if not cpg:
         logger.error("Failed to build CPG")
         return 1
-        
-    # Convert CPG to features using CPGDataset converter
-    dataset = CPGDataset(cpg_dir=Path("./cpg_cache")) # Dummy target dir
-    data = dataset._cpg_to_data(cpg)
-    
-    # Generate and load corresponding grayscale image
-    logger.info(f"Generating grayscale image representation...")
-    img = pe_to_grayscale_image(input_path, target_size=224)
-    # Convert single-channel 'L' grayscale to 3-channel 'RGB' so that
-    # transforms.ToTensor() produces shape [3, 224, 224] as expected by
-    # the ImageNet-normalisation stats and the LeViT/CNN feature extractor.
-    img = img.convert('RGB')
-    img_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
-    data.image = img_transform(img)
 
-    # ── RansomFormer inputs: sliding-window bytes + API tokens ────────────────
-    logger.info("Extracting PE byte sequence and API import tokens...")
-    api_names = list(cpg.metadata.get('imports', [])) if cpg.metadata else []
-    pe_bytes_tensor, api_tokens_tensor = extract_ransomformer_features(
+    dataset = CPGDataset(cpg_dir=input_path.parent, embedding_dim=cfg.get("embedding_dim", 320))
+    data    = dataset._cpg_to_data(cpg)
+
+    # ── Grayscale byte-image ──────────────────────────────────────────────────
+    logger.info("Generating grayscale byte-image …")
+    img_tf = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225]),
+    ])
+    data.image = img_tf(
+        pe_to_grayscale_image(input_path, target_size=224).convert("RGB")
+    )
+
+    # ── RansomFormer inputs ───────────────────────────────────────────────────
+    logger.info("Extracting PE byte sequence and API import tokens …")
+    api_names = list(cpg.metadata.get("imports", [])) if cpg.metadata else []
+    data.pe_bytes, data.api_tokens = extract_ransomformer_features(
         input_path, api_names=api_names
     )
-    data.pe_bytes   = pe_bytes_tensor    # [1, 1024]
-    data.api_tokens = api_tokens_tensor  # [max_apis]
-    
-    # Collate single element into a batch
+
     batch_data, batch_idx = collate_cpg_batch([data])
-    
-    # Run BNN inference with Monte Carlo sampling (T = 20)
-    logger.info("Running Bayesian Neural Network Monte Carlo sampling (quad-modal)...")
+    batch_data = batch_data.to(device)
+    batch_idx  = batch_idx.to(device)
+
+    # ── Monte Carlo inference ─────────────────────────────────────────────────
+    logger.info("Running Monte Carlo inference …")
     preds, confidence, variance = model.predict_with_confidence(
         batch_data.x, batch_data.edge_index,
         batch_data.node_types, batch_data.edge_types,
         batch_idx, batch_data.image,
         batch_data.pe_bytes, batch_data.api_tokens,
-        num_samples=20
+        num_samples=20,
     )
-    
-    pred_class = preds[0].item()
-    conf_score = confidence[0].item()
+
+    pred_class    = preds[0].item()
+    conf_score    = confidence[0].item()
     epistemic_var = variance[0].item()
-    
-    label_map = {0: "BENIGN", 1: "MALWARE"}
-    print("\n" + "=" * 62)
-    print("   QUAD-MODAL MALWARE DETECTION  (HGT+ResNet+RansomFormer+BNN)")
-    print("=" * 62)
-    print(f"  Target File:       {input_path.name}")
-    print(f"  Malware Detection: {label_map.get(pred_class, 'UNKNOWN')}")
-    print(f"  Confidence Level:  {conf_score * 100:.2f}%")
-    print(f"  Epistemic Var:     {epistemic_var:.6f}")
-    print("=" * 62 + "\n")
-    
+
+    label_map = cfg.get("label_map", {"0": "BENIGN", "1": "MALWARE"})
+    label     = label_map.get(str(pred_class), "UNKNOWN")
+
+    border = "=" * 66
+    print(f"\n{border}")
+    print("  ViGil \u2014 Quad-Modal Malware Detection")
+    print("  Architecture: OptimizedHGT + ConvNeXt + AttentionByte + CLSTransformerAPI \u2192 DeepResMLP")
+    print(border)
+    print(f"  File:        {input_path.name}")
+    print(f"  Verdict:     {label}")
+    print(f"  Confidence:  {conf_score * 100:.2f}%")
+    print(f"  Uncertainty: {epistemic_var:.6f}  (epistemic variance, MC dropout)")
+    print(f"{border}\n")
+
     return 0
 
 def cmd_export_zip(args):

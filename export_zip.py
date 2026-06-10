@@ -2,16 +2,19 @@
 export_zip.py — ViGil Deployment Packager
 
 Creates a self-contained vigil_deploy.zip after Kaggle training.
-The ZIP contains all model weights + a standalone predict.py that
-works without the `uir` package installed.
+The ZIP contains model weights + predict.py + all required source files.
+
+Architecture (matches traning_notebook/vigil.ipynb):
+  OptimizedHGT + ConvNeXt-Tiny + AttentionByte + CLSTransformerAPI → DeepResMLP
+  Fused dim: 768 (HGT) + 512 (CNN) + 256 (RF) = 1536
 
 Usage:
-    python export_zip.py --checkpoint checkpoints/best_joint_model_*.pt \
+    python export_zip.py --checkpoint models/01/models/joint_model.pt \
                          --output vigil_deploy.zip
 
 Or via CLI:
     python -m uir.pipeline.cli export-zip \
-        --checkpoint checkpoints/best_joint_model_20260604_083010.pt \
+        --checkpoint models/01/models/joint_model.pt \
         --output vigil_deploy.zip
 """
 
@@ -22,28 +25,27 @@ import zipfile
 from pathlib import Path
 
 # Source files to bundle inside the ZIP (relative to project root)
+# optimized_models.py contains the exact notebook architecture classes.
 _MODEL_SOURCES = [
-    "uir/model/joint_model.py",
-    "uir/model/resnet_extractor.py",
-    "uir/model/ransomformer.py",
-    "uir/model/hgt.py",
+    "uir/model/optimized_models.py",
     "uir/extraction/pe_feature_extractor.py",
 ]
 
 _STANDALONE_PREDICTOR = "predict.py"
 
+# Matches MODEL_CONFIG written by traning_notebook/vigil.ipynb
 _MODEL_CONFIG = {
-    "embedding_dim": 320,
-    "hidden_dim":    256,
+    "embedding_dim": 256,
+    "hidden_dim":    384,
     "num_heads":     8,
-    "num_layers":    4,
+    "num_layers":    6,
     "num_classes":   2,
-    "fused_dim":     1152,   # 512 + 384 + 256
+    "fused_dim":     1536,  # HGT(768) + ConvNeXt(512) + RF(256)
     "byte_seq_len":  1024,
     "max_apis":      256,
     "api_vocab_size": 4096,
     "label_map":     {"0": "BENIGN", "1": "MALWARE"},
-    "architecture":  "HGT(512) + ResNet50(384) + RansomFormer(256) → BNN",
+    "architecture":  "OptimizedHGT + ConvNeXt + AttentionByte + CLSTransformerAPI → DeepResMLP",
 }
 
 
@@ -98,9 +100,24 @@ def create_deploy_zip(checkpoint_path: Path, output_zip: Path):
             print("   ⚠  predict.py not found — skipping")
 
         # ── model_config.json ─────────────────────────────────────────────────
+        cfg = dict(_MODEL_CONFIG)
+        try:
+            import torch
+            ckpt = torch.load(checkpoint_path, map_location="cpu")
+            state = ckpt.get("model_state", ckpt)
+            if "hgt.proj.0.weight" in state:
+                weight_shape = state["hgt.proj.0.weight"].shape
+                if len(weight_shape) == 2:
+                    detected_dim = weight_shape[1]
+                    if detected_dim != cfg["embedding_dim"]:
+                        print(f"   ✓  detected embedding_dim = {detected_dim} from checkpoint (updating config)")
+                        cfg["embedding_dim"] = detected_dim
+        except Exception as e:
+            print(f"   ⚠  Could not load checkpoint for config auto-detect: {e}")
+
         zf.writestr(
             "vigil_deploy/model_config.json",
-            json.dumps(_MODEL_CONFIG, indent=2),
+            json.dumps(cfg, indent=2),
         )
         print("   ✓  model_config.json")
 
@@ -121,7 +138,7 @@ def _build_readme() -> str:
 # ViGil Deployment Package
 
 ## Quad-Modal Malware Detection
-**Architecture:** HGT (CPG) + ResNet-50 (grayscale image) + RansomFormer (bytes + API) → BNN
+**Architecture:** OptimizedHGT + ConvNeXt-Tiny + AttentionByteEncoder + CLSTransformerAPI → DeepResMLP
 
 ### Requirements
 ```
@@ -130,31 +147,32 @@ pip install torch torchvision numpy pillow
 
 ### Predict on a single file
 ```bash
-python vigil_deploy/predict.py \\
-    --model  vigil_deploy/models/joint_model.pt \\
-    --file   suspicious.exe
+python predict.py --file suspicious.exe
+# or from extracted zip:
+python vigil_deploy/predict.py --model vigil_deploy/models/joint_model.pt --file suspicious.exe
 ```
 
 ### Output
 ```
-==============================================================
-   QUAD-MODAL MALWARE DETECTION  (HGT+ResNet+RansomFormer+BNN)
-==============================================================
+==================================================================
+  ViGil — Quad-Modal Malware Detection
+  Architecture: OptimizedHGT + ConvNeXt + AttentionByte + CLSTransformerAPI → DeepResMLP
+==================================================================
   File:        suspicious.exe
-  Prediction:  MALWARE
+  Verdict:     MALWARE
   Confidence:  94.23%
-  Uncertainty: 0.000412
-==============================================================
+  Uncertainty: 0.000412  (epistemic variance, MC dropout)
+==================================================================
 ```
 
 ### Architecture Details
-| Stream         | Input               | Encoder              | Output  |
-|----------------|---------------------|----------------------|---------|
-| CPG Graph      | Node/edge tensors   | HGT (4 layers)       | 512-dim |
-| Grayscale Img  | 224×224 RGB tensor  | ResNet-50 (layer4)   | 384-dim |
-| PE Bytes       | 1×1024 float        | 1D CNN (64→128 filt) | 256-dim |
-| API Imports    | 256 token IDs       | Transformer (8L×8H)  | 256-dim |
-| **Fusion**     | concat [B, 1152]    | BNN (MC sampling)    | 2-class |
+| Stream         | Input               | Encoder                          | Output   |
+|----------------|---------------------|----------------------------------|----------|
+| CPG Graph      | Node/edge tensors   | OptimizedHGT (6 layers, 8 heads) | 768-dim  |
+| Grayscale Img  | 224×224 RGB tensor  | ConvNeXt-Tiny                    | 512-dim  |
+| PE Bytes       | [1×1024] float      | 3-layer 1D CNN + attention pool  | 256-dim  |
+| API Imports    | 256 token IDs       | Pre-LN Transformer + CLS token   | 256-dim  |
+| **Fusion**     | concat [B, 1536]    | DeepResMLP (MC dropout)          | 2-class  |
 """
 
 

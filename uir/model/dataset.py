@@ -848,7 +848,10 @@ def collate_cpg_batch(batch: List[CPGData]) -> Tuple[CPGData, torch.Tensor]:
     combined = CPGData()
     combined.x = torch.cat(xs, dim=0)
     combined.node_types = torch.cat(node_types, dim=0)
-    combined.y = torch.cat(ys, dim=0)
+    if any(y is None for y in ys):
+        combined.y = None
+    else:
+        combined.y = torch.cat(ys, dim=0)
     combined.image = torch.stack(images, dim=0)        # [B, 3, 224, 224]
     combined.pe_bytes = torch.stack(pe_bytes_list, dim=0)    # [B, 1, 1024]
     combined.api_tokens = torch.stack(api_tokens_list, dim=0)  # [B, max_apis]
