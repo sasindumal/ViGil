@@ -59,16 +59,45 @@ class FileRouter:
             elif self.is_container(file_type):
                 route = "container"
             else:
-                route = "unsupported"
+                # Fallback: check if the file is text-based to allow any script/text type
+                is_text = False
+                try:
+                    with open(file_path, "rb") as f:
+                        chunk = f.read(8000)
+                    if chunk and b"\x00" not in chunk:
+                        try:
+                            chunk.decode("utf-8")
+                            is_text = True
+                        except UnicodeDecodeError:
+                            try:
+                                chunk.decode("latin-1")
+                                is_text = True
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                if is_text:
+                    route = "script"
+                    category = FileCategory.SCRIPT
+                    # Use suffix as file type (e.g. rb, lua) if present
+                    suffix = file_path.suffix.lstrip(".").lower()
+                    file_type = suffix if suffix else "text"
+                    confidence = 0.8
+                else:
+                    route = "unsupported"
+
+            file_type_str = file_type.value if hasattr(file_type, "value") else str(file_type)
+            category_str = category.value if hasattr(category, "value") else str(category)
 
             logger.info(
                 "File router: %s identified as %s (%s) → routed to '%s' (conf: %.2f)",
-                file_path.name, file_type.value, category.value, route, confidence
+                file_path.name, file_type_str, category_str, route, confidence
             )
 
             return {
-                "file_type": file_type.value,
-                "category": category.value,
+                "file_type": file_type_str,
+                "category": category_str,
                 "route": route,
                 "confidence": confidence,
                 "mime_type": id_res.mime_type,
