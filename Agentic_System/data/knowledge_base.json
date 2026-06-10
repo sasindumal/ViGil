@@ -3,5 +3,7 @@
   "ttps": {},
   "evasion_techniques": {},
   "behavioral_patterns": [],
-  "ioc_patterns": {}
+  "ioc_patterns": {
+    "www.w3.org": 1
+  }
 }

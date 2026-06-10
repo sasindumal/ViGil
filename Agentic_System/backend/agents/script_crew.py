@@ -162,7 +162,7 @@ class ScriptAnalysisCrew:
         ]
 
         # Fetch memory settings
-        crew_mem_config = self.memory_mgr.get_crew_memory_config()
+        crew_mem_config = self.memory_mgr.get_crew_memory_config(self.llm, "script_analysis_crew")
 
         crew = Crew(
             agents=agents,
