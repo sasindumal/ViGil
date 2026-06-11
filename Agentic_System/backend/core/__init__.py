@@ -1,0 +1,1 @@
+"""ViGil — Core package"""

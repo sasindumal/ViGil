@@ -1,0 +1,38 @@
+{
+  "malware_families": {},
+  "ttps": {},
+  "evasion_techniques": {
+    "GetLastError": 6,
+    "SetUnhandledExceptionFilter": 4,
+    "IsDebuggerPresent": 4,
+    "OutputDebugStringW": 1
+  },
+  "behavioral_patterns": [],
+  "ioc_patterns": {
+    "www.w3.org": 2,
+    "schemas.microsoft.com": 2,
+    "crl3.digicert.com": 4,
+    "crl4.digicert.com": 4,
+    "www.digicert.com": 3,
+    "cacerts.digicert.com": 4,
+    "ocsp.digicert.com0C": 1,
+    "ocsp.digicert.com0H": 1,
+    "ocsp.digicert.com0I": 1,
+    "ocsp.digicert.com0O": 1,
+    "cevcsca2021.ocsp-certum.com07": 1,
+    "repository.certum.pl": 2,
+    "cevcsca2021.crl.certum.pl": 1,
+    "crl.certum.pl": 1,
+    "subca.ocsp-certum.com02": 1,
+    "www.certum.pl": 2,
+    "xv.%s.com": 1,
+    "s.symcb.com": 1,
+    "ts-aia.ws.symantec.com": 1,
+    "ts-crl.ws.symantec.com": 1,
+    "nsis.sf.net": 1,
+    "s.symcd.com06": 1,
+    "ts-ocsp.ws.symantec.com0;": 1,
+    "d.symcb.com": 3,
+    "www.clamav.net": 1
+  }
+}

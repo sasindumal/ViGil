@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="cyan-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00f2fe" />
+      <stop offset="100%" stop-color="#0072ff" />
+    </linearGradient>
+    <linearGradient id="purple-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a855f7" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+    <radialGradient id="core-grad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="30%" stop-color="#00f2fe" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#0072ff" stop-opacity="0" />
+    </radialGradient>
+    
+    <!-- Glow Filters -->
+    <filter id="glow-cyan" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <filter id="glow-purple" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <style>
+    @keyframes pulse-core {
+      0%, 100% { transform: scale(0.85); opacity: 0.6; }
+      50% { transform: scale(1.15); opacity: 1; }
+    }
+    @keyframes scan-line {
+      0% { stroke-dashoffset: 0; }
+      100% { stroke-dashoffset: -50; }
+    }
+    @keyframes rotate-radar {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .pulsing-core {
+      animation: pulse-core 3s infinite ease-in-out;
+      transform-origin: 50px 50px;
+    }
+    .scanner {
+      stroke-dasharray: 10, 15;
+      animation: scan-line 4s infinite linear;
+    }
+    .radar {
+      animation: rotate-radar 20s infinite linear;
+      transform-origin: 50px 50px;
+    }
+  </style>
+
+  <!-- Background Layer (Subtle Grid or Ring) -->
+  <circle cx="50" cy="50" r="44" fill="none" stroke="rgba(0, 242, 254, 0.05)" stroke-width="1" />
+  
+  <!-- Outer Rotating Radar Ring -->
+  <circle class="radar" cx="50" cy="50" r="40" fill="none" stroke="rgba(168, 85, 247, 0.2)" stroke-dasharray="2, 8" stroke-width="1.5" />
+  <circle class="radar" cx="50" cy="50" r="38" fill="none" stroke="rgba(0, 242, 254, 0.15)" stroke-dasharray="20, 40, 10, 30" stroke-width="1" />
+
+  <!-- Outer Hexagonal / Shield Cyber Outline -->
+  <path class="scanner" d="M 50 12 L 80 27 L 80 55 C 80 72, 67 83, 50 88 C 33 83, 20 72, 20 55 L 20 27 Z" 
+        fill="none" stroke="url(#cyan-grad)" stroke-width="2.5" filter="url(#glow-cyan)" />
+
+  <!-- Inner Dark Glass Shield -->
+  <path d="M 50 16 L 76 29 L 76 54 C 76 69, 64 79, 50 84 C 36 79, 24 69, 24 54 L 24 29 Z" 
+        fill="rgba(10, 14, 26, 0.65)" stroke="url(#purple-grad)" stroke-width="1.5" filter="url(#glow-purple)" />
+
+  <!-- Tech Lines & Grid Details inside the Shield -->
+  <!-- Horizontal Tech Bars -->
+  <line x1="32" y1="42" x2="68" y2="42" stroke="rgba(0, 242, 254, 0.3)" stroke-width="1" />
+  <line x1="32" y1="58" x2="68" y2="58" stroke="rgba(168, 85, 247, 0.3)" stroke-width="1" />
+
+  <!-- Diagonal Crosslines -->
+  <line x1="35" y1="35" x2="65" y2="65" stroke="rgba(0, 242, 254, 0.15)" stroke-width="0.75" />
+  <line x1="65" y1="35" x2="35" y2="65" stroke="rgba(0, 242, 254, 0.15)" stroke-width="0.75" />
+
+  <!-- Glowing Core -->
+  <circle class="pulsing-core" cx="50" cy="50" r="16" fill="url(#core-grad)" />
+  <circle class="pulsing-core" cx="50" cy="50" r="7" fill="#ffffff" filter="url(#glow-cyan)" />
+  <circle cx="50" cy="50" r="3" fill="#00f2fe" />
+  
+  <!-- Corner Tech Accent Marks -->
+  <path d="M 45 22 L 50 19 L 55 22" fill="none" stroke="#00f2fe" stroke-width="1.5" stroke-linecap="round" />
+  <path d="M 47 80 L 50 82 L 53 80" fill="none" stroke="#a855f7" stroke-width="1.5" stroke-linecap="round" />
+</svg>
