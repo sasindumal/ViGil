@@ -21,6 +21,7 @@ from typing import Tuple
 from collections import Counter
 import numpy as np
 import torchvision.models as models
+import torchvision.transforms as T
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score, classification_report, confusion_matrix
@@ -324,11 +325,11 @@ class OptimizedFusion(nn.Module):
         self.fc1 = nn.Linear(in_f, hidden)
         self.act1 = nn.GELU()
         self.norm1 = nn.LayerNorm(hidden)
-        self.drop1 = nn.Dropout(0.4)
+        self.drop1 = nn.Dropout(0.25)
         self.fc2 = nn.Linear(hidden, hidden)
         self.act2 = nn.GELU()
         self.norm2 = nn.LayerNorm(hidden)
-        self.drop2 = nn.Dropout(0.4)
+        self.drop2 = nn.Dropout(0.25)
         self.fc3 = nn.Linear(hidden, hidden // 2)
         self.act3 = nn.GELU()
         self.norm3 = nn.LayerNorm(hidden // 2)
@@ -381,17 +382,28 @@ print('✓ Optimized Model Classes Defined')
 # 4. DATA LOADERS & TRAINING SETUP
 # ==========================================
 
+# Image augmentation for training — applied on pre-extracted 224×224 tensors
+train_aug = T.Compose([
+    T.RandomHorizontalFlip(p=0.5),
+    T.RandomAffine(degrees=0, translate=(0.05, 0.05)),
+    T.RandomErasing(p=0.3, scale=(0.02, 0.10), value=0),
+])
+
 class PreExtractedDataset(Dataset):
-    def __init__(self, feat_dir):
+    def __init__(self, feat_dir, transform=None):
         self.files = sorted(Path(feat_dir).rglob('*.feat.pt'))
+        self.transform = transform
         print(f'Found {len(self.files)} samples')
     def __len__(self): return len(self.files)
     def __getitem__(self, idx):
         feat = torch.load(self.files[idx], map_location='cpu')
+        img = feat.get('image', torch.zeros(3,224,224))
+        if self.transform is not None:
+            img = self.transform(img)
         return {
             'x': feat.get('x', torch.zeros(1,320)), 'edge_index': feat.get('edge_index', torch.zeros(2,0,dtype=torch.long)),
             'node_types': feat.get('node_types', torch.zeros(1,dtype=torch.long)), 'edge_types': feat.get('edge_types', torch.zeros(0,dtype=torch.long)),
-            'image': feat.get('image', torch.zeros(3,224,224)), 'pe_bytes': feat.get('pe_bytes', torch.zeros(1,1024)),
+            'image': img, 'pe_bytes': feat.get('pe_bytes', torch.zeros(1,1024)),
             'api_tokens': feat.get('api_tokens', torch.zeros(256,dtype=torch.long)), 'label': torch.tensor(int(feat.get('label',0)), dtype=torch.long)
         }
 
@@ -405,17 +417,19 @@ def collate(batch):
     batch_idx=torch.cat(batches); ei=torch.cat(eis,1) if eis else torch.zeros(2,0,dtype=torch.long); et=torch.cat(ets) if ets else torch.zeros(0,dtype=torch.long)
     return (torch.cat(xs), ei, torch.cat(nts), et, batch_idx, torch.stack(imgs), torch.stack(pbs), torch.stack(ats), torch.cat(ys).squeeze())
 
-dataset = PreExtractedDataset(FEAT_DIR)
-labels = [int(torch.load(f, map_location='cpu').get('label', 0)) for f in dataset.files]
-indices = list(range(len(dataset)))
+# Create separate datasets for train (with augmentation) and val/test (no augmentation)
+dataset_noaug = PreExtractedDataset(FEAT_DIR, transform=None)
+dataset_aug   = PreExtractedDataset(FEAT_DIR, transform=train_aug)
+labels = [int(torch.load(f, map_location='cpu').get('label', 0)) for f in dataset_noaug.files]
+indices = list(range(len(dataset_noaug)))
 tv_idx, te_idx = train_test_split(indices, test_size=0.10, stratify=labels, random_state=42)
 tv_lbl = [labels[i] for i in tv_idx]
 tr_idx, va_idx = train_test_split(tv_idx, test_size=0.111, stratify=tv_lbl, random_state=42)
 
 BATCH = 32; NUM_WORKERS = min(os.cpu_count(), 4)
-train_dl = DataLoader(torch.utils.data.Subset(dataset,tr_idx), BATCH, shuffle=True, drop_last=True, collate_fn=collate, num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True)
-val_dl   = DataLoader(torch.utils.data.Subset(dataset,va_idx), BATCH, shuffle=False, drop_last=False, collate_fn=collate, num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True)
-test_dl  = DataLoader(torch.utils.data.Subset(dataset,te_idx), BATCH, shuffle=False, drop_last=False, collate_fn=collate, num_workers=NUM_WORKERS, pin_memory=True)
+train_dl = DataLoader(torch.utils.data.Subset(dataset_aug, tr_idx), BATCH, shuffle=True, drop_last=True, collate_fn=collate, num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True)
+val_dl   = DataLoader(torch.utils.data.Subset(dataset_noaug, va_idx), BATCH, shuffle=False, drop_last=False, collate_fn=collate, num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True)
+test_dl  = DataLoader(torch.utils.data.Subset(dataset_noaug, te_idx), BATCH, shuffle=False, drop_last=False, collate_fn=collate, num_workers=NUM_WORKERS, pin_memory=True)
 
 print(f'Train: {len(tr_idx)}  Val: {len(va_idx)}  Test: {len(te_idx)}')
 
@@ -424,7 +438,7 @@ DEVICE_0 = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 DEVICE_1 = DEVICE_0
 print(f'🚀 Single-GPU Pipeline: HGT and Dense Features on {DEVICE_0}')
 
-sample_feat = torch.load(dataset.files[0], map_location='cpu')
+sample_feat = torch.load(dataset_noaug.files[0], map_location='cpu')
 IN_DIM = sample_feat.get('x', torch.zeros(1,320)).size(1)
 HIDDEN=384; LAYERS=6; HEADS=8; FUSED=1536; N_CLS=2
 
@@ -444,14 +458,29 @@ total_train = len(tr_idx)
 weights = [total_train / (len(class_counts) * class_counts[c]) for c in sorted(class_counts.keys())]
 class_weights = torch.tensor(weights, dtype=torch.float32).to(DEVICE_1) 
 
-EPOCHS = 50; LR = 2e-4; PATIENCE = 15
+EPOCHS = 60; LR = 2e-4; PATIENCE = 20; UNFREEZE_EPOCH = 10
 optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=LR, weight_decay=1e-2)
-criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=0.0) 
+criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=0.1) 
 
-from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
+from torch.optim.lr_scheduler import LinearLR, CosineAnnealingWarmRestarts, SequentialLR
 warmup = LinearLR(optimizer, start_factor=0.1, end_factor=1.0, total_iters=5)
-cosine = CosineAnnealingLR(optimizer, T_max=EPOCHS - 5, eta_min=1e-6)
+cosine = CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2, eta_min=1e-6)
 scheduler = SequentialLR(optimizer, schedulers=[warmup, cosine], milestones=[5])
+
+# ── Mixup helper ──
+def mixup_data(imgs, y, alpha=0.4):
+    """Apply mixup to a batch — interpolates images and returns mixed labels."""
+    if alpha > 0:
+        lam = np.random.beta(alpha, alpha)
+        lam = max(lam, 1.0 - lam)  # Keep lam >= 0.5 so the dominant sample stays dominant
+    else:
+        lam = 1.0
+    idx = torch.randperm(imgs.size(0), device=imgs.device)
+    mixed_imgs = lam * imgs + (1.0 - lam) * imgs[idx]
+    return mixed_imgs, y, y[idx], lam, idx
+
+def mixup_criterion(criterion, logits, y_a, y_b, lam):
+    return lam * criterion(logits, y_a) + (1.0 - lam) * criterion(logits, y_b)
 
 class ModelEMA:
     def __init__(self, model, decay=0.995):
@@ -471,13 +500,40 @@ class ModelEMA:
             if param.requires_grad: param.data = self.backup[name]
 
 ema = ModelEMA(model)
-scaler = torch.cuda.amp.GradScaler() 
+scaler = torch.amp.GradScaler('cuda') 
 best_f1 = 0.0; best_path = CKPT_DIR / 'best_joint_model.pt'; patience_ctr = 0
 
 # ==========================================
-# 5. TRAINING LOOP
+# 5. TRAINING LOOP (with Mixup + Progressive Unfreezing)
 # ==========================================
+unfrozen = False
 for epoch in range(1, EPOCHS + 1):
+    # ── Progressive unfreezing: unlock ConvNeXt stages 4-5 after UNFREEZE_EPOCH ──
+    if epoch == UNFREEZE_EPOCH and not unfrozen:
+        unfrozen = True
+        for i in [4, 5]:
+            for param in model.rest.cnn.features[i].parameters():
+                param.requires_grad = True
+        # Rebuild optimizer with new param groups (lower LR for unfrozen CNN layers)
+        cnn_unfrozen_params = []
+        other_params = []
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                if 'rest.cnn.features.4' in name or 'rest.cnn.features.5' in name:
+                    cnn_unfrozen_params.append(param)
+                else:
+                    other_params.append(param)
+        optimizer = torch.optim.AdamW([
+            {'params': other_params, 'lr': scheduler.get_last_lr()[0]},
+            {'params': cnn_unfrozen_params, 'lr': scheduler.get_last_lr()[0] * 0.1},  # 10x lower
+        ], weight_decay=1e-2)
+        # Re-create scheduler for remaining epochs
+        cosine_new = CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2, eta_min=1e-6)
+        scheduler = cosine_new
+        scaler = torch.amp.GradScaler('cuda')
+        ema = ModelEMA(model)  # Reset EMA with new trainable params
+        print(f'🔓 Epoch {epoch}: Unfroze ConvNeXt stages 4-5 with 10x lower LR')
+
     model.train(); tl = 0; tc = 0
     for x, ei, nt, et, bi, imgs, pb, at, y in train_dl:
         x=x.to(DEVICE_0, non_blocking=True); ei=ei.to(DEVICE_0, non_blocking=True)
@@ -486,11 +542,14 @@ for epoch in range(1, EPOCHS + 1):
         imgs=imgs.to(DEVICE_1, non_blocking=True); pb=pb.to(DEVICE_1, non_blocking=True)
         at=at.to(DEVICE_1, non_blocking=True); y=y.to(DEVICE_1, non_blocking=True)
 
+        # ── Mixup on images ──
+        mixed_imgs, y_a, y_b, lam, mix_idx = mixup_data(imgs, y, alpha=0.4)
+
         optimizer.zero_grad(set_to_none=True)
-        with torch.cuda.amp.autocast():
-            logits = model(x, ei, nt, et, bi, imgs, pb, at, sample=True)
-            # FIX: Cast logits to float32 to match class_weights dtype and ensure AMP stability
-            loss = criterion(logits.float(), y)
+        with torch.amp.autocast('cuda'):
+            logits = model(x, ei, nt, et, bi, mixed_imgs, pb, at, sample=True)
+            # Mixup loss: weighted combination of losses for both targets
+            loss = mixup_criterion(criterion, logits.float(), y_a, y_b, lam)
             
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
@@ -499,7 +558,7 @@ for epoch in range(1, EPOCHS + 1):
         scaler.update()
         ema.update()
         
-        tl += loss.item(); tc += (logits.argmax(-1) == y).sum().item()
+        tl += loss.item(); tc += (logits.argmax(-1) == y_a).sum().item()  # Track acc against dominant target
 
     scheduler.step()
     train_loss = tl / len(train_dl); train_acc = tc / (len(train_dl) * BATCH)
@@ -514,7 +573,7 @@ for epoch in range(1, EPOCHS + 1):
             imgs=imgs.to(DEVICE_1, non_blocking=True); pb=pb.to(DEVICE_1, non_blocking=True)
             at=at.to(DEVICE_1, non_blocking=True); y=y.to(DEVICE_1, non_blocking=True)
 
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast('cuda'):
                 logits = model(x, ei, nt, et, bi, imgs, pb, at, sample=False)
             # FIX: Cast logits to float32 to match class_weights dtype outside autocast context
             vl += criterion(logits.float(), y).item()
@@ -541,11 +600,91 @@ for epoch in range(1, EPOCHS + 1):
 print(f'\n✅ Training complete. Best Val F1: {best_f1:.4f}')
 
 # ==========================================
-# 6. EVALUATION & DEPLOYMENT
+# 5b. STOCHASTIC WEIGHT AVERAGING (SWA)
+# ==========================================
+from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
+
+print('\n🔄 Starting SWA post-training (10 epochs)...')
+
+# Load best checkpoint as the SWA starting point
+ckpt = torch.load(best_path, map_location=DEVICE_1)
+model.load_state_dict(ckpt['model_state'])
+
+swa_model = AveragedModel(model)
+swa_optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=5e-5, weight_decay=1e-2)
+swa_scheduler = SWALR(swa_optimizer, swa_lr=5e-5, anneal_epochs=2)
+swa_scaler = torch.amp.GradScaler('cuda')
+
+SWA_EPOCHS = 10
+for swa_epoch in range(1, SWA_EPOCHS + 1):
+    model.train(); swa_tl = 0
+    for x, ei, nt, et, bi, imgs, pb, at, y in train_dl:
+        x=x.to(DEVICE_0, non_blocking=True); ei=ei.to(DEVICE_0, non_blocking=True)
+        nt=nt.to(DEVICE_0, non_blocking=True); et=et.to(DEVICE_0, non_blocking=True)
+        bi=bi.to(DEVICE_0, non_blocking=True)
+        imgs=imgs.to(DEVICE_1, non_blocking=True); pb=pb.to(DEVICE_1, non_blocking=True)
+        at=at.to(DEVICE_1, non_blocking=True); y=y.to(DEVICE_1, non_blocking=True)
+
+        swa_optimizer.zero_grad(set_to_none=True)
+        with torch.amp.autocast('cuda'):
+            logits = model(x, ei, nt, et, bi, imgs, pb, at, sample=True)
+            loss = criterion(logits.float(), y)
+        swa_scaler.scale(loss).backward()
+        swa_scaler.unscale_(swa_optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        swa_scaler.step(swa_optimizer)
+        swa_scaler.update()
+        swa_tl += loss.item()
+    
+    swa_scheduler.step()
+    swa_model.update_parameters(model)
+    print(f'  SWA Epoch {swa_epoch}/{SWA_EPOCHS} | Loss: {swa_tl/len(train_dl):.4f}')
+
+# Update BatchNorm stats for SWA model
+print('  Updating BatchNorm statistics for SWA model...')
+
+# Need a dataloader that returns all inputs for BN update
+# We'll manually update BN since update_bn expects a simple dataloader
+swa_model.eval()
+with torch.no_grad():
+    # Reset BN running stats
+    for module in swa_model.modules():
+        if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d)):
+            module.reset_running_stats()
+            module.momentum = None  # Use cumulative moving average
+    
+    swa_model.train()
+    for x, ei, nt, et, bi, imgs, pb, at, y in train_dl:
+        x=x.to(DEVICE_0, non_blocking=True); ei=ei.to(DEVICE_0, non_blocking=True)
+        nt=nt.to(DEVICE_0, non_blocking=True); et=et.to(DEVICE_0, non_blocking=True)
+        bi=bi.to(DEVICE_0, non_blocking=True)
+        imgs=imgs.to(DEVICE_1, non_blocking=True); pb=pb.to(DEVICE_1, non_blocking=True)
+        at=at.to(DEVICE_1, non_blocking=True)
+        with torch.amp.autocast('cuda'):
+            swa_model.module(x, ei, nt, et, bi, imgs, pb, at, sample=False)
+
+# Save SWA model as the new best
+swa_state = swa_model.module.state_dict()
+torch.save({'model_state': swa_state, 'epoch': 'swa', 'val_f1': best_f1}, best_path)
+print('✅ SWA complete — checkpoint updated.')
+
+# ==========================================
+# 6. EVALUATION & DEPLOYMENT (with TTA)
 # ==========================================
 ckpt = torch.load(best_path, map_location=DEVICE_1)
 model.load_state_dict(ckpt['model_state'])
 model.eval()
+
+# ── Test-Time Augmentation (TTA) ──
+# Run each test sample through 5 augmentation variants and average logits
+print('\n🔬 Running Test-Time Augmentation (5 passes)...')
+tta_transforms = [
+    nn.Identity(),                                      # Original
+    T.RandomHorizontalFlip(p=1.0),                      # Horizontal flip
+    T.RandomAffine(degrees=0, translate=(0.03, 0.03)),  # Small shift 1
+    T.RandomAffine(degrees=0, translate=(0.05, 0.05)),  # Small shift 2
+    T.RandomErasing(p=1.0, scale=(0.02, 0.06), value=0),# Small erase
+]
 
 all_preds=[]; all_labels=[]
 with torch.no_grad():
@@ -556,19 +695,29 @@ with torch.no_grad():
         imgs=imgs.to(DEVICE_1, non_blocking=True);pb=pb.to(DEVICE_1, non_blocking=True)
         at=at.to(DEVICE_1, non_blocking=True);y=y.to(DEVICE_1, non_blocking=True)
         
-        with torch.cuda.amp.autocast():
-            logits=model(x,ei,nt,et,bi,imgs,pb,at,sample=False)
-        all_preds.extend(logits.argmax(-1).cpu().tolist())
+        # Accumulate logits across TTA passes
+        avg_logits = None
+        for tta_t in tta_transforms:
+            aug_imgs = tta_t(imgs)
+            with torch.amp.autocast('cuda'):
+                logits = model(x, ei, nt, et, bi, aug_imgs, pb, at, sample=False)
+            if avg_logits is None:
+                avg_logits = logits.float()
+            else:
+                avg_logits = avg_logits + logits.float()
+        avg_logits = avg_logits / len(tta_transforms)
+        
+        all_preds.extend(avg_logits.argmax(-1).cpu().tolist())
         all_labels.extend(y.cpu().tolist())
 
 test_acc = sum(p == l for p, l in zip(all_preds, all_labels)) / len(all_labels)
-print(f'\nTest Accuracy: {test_acc:.4f}')
+print(f'\nTest Accuracy (with TTA): {test_acc:.4f}')
 print(classification_report(all_labels, all_preds, target_names=['Benign','Malware']))
 
 cm = confusion_matrix(all_labels, all_preds)
 plt.figure(figsize=(5,4))
 sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Benign','Malware'], yticklabels=['Benign','Malware'])
-plt.title('Confusion Matrix — Test Set'); plt.tight_layout(); plt.savefig('/kaggle/working/confusion_matrix.png')
+plt.title('Confusion Matrix — Test Set (SWA + TTA)'); plt.tight_layout(); plt.savefig('/kaggle/working/confusion_matrix.png')
 plt.show()
 
 DEPLOY_ZIP  = Path('/kaggle/working/vigil_deploy.zip')
