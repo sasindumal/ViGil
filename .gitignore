@@ -13,3 +13,7 @@ vigil_src.zip
 /cpg
 /cpgs_gtx
 /models
+/Agentic_System/frontend/node_modules
+/Agentic_System/uploads
+/Agentic_System/frontend/.next
+/Agentic_System/cpg_cache
